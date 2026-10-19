@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Консольный симулятор генератора лута. Подключает ТЕ ЖЕ файлы из src/Diabloid/Loot,
+    что и мод, но без Unity и RoR2 — можно крутить баланс, не запуская игру.
+    Как запускать — см. комментарий в начале Program.cs.
+    (Примеры сюда не вписать: в XML-комментарии нельзя писать два минуса подряд.)
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\..\src\Diabloid\Loot\**\*.cs" Link="Loot\%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+
+</Project>

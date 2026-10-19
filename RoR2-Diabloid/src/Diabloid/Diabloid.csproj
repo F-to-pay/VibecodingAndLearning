@@ -1,0 +1,52 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- RoR2 (Unity 2021.3, Mono) понимает netstandard2.1 -->
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>Diabloid</AssemblyName>
+    <RootNamespace>Diabloid</RootNamespace>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <DebugType>embedded</DebugType>
+    <!-- CS0618: устаревшие члены игры; NU1701: пакеты под .NET Framework; Publicizer001: доступ к private через публицированные GameLibs -->
+    <NoWarn>$(NoWarn);CS0618;NU1701;Publicizer001</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BepInEx.Core" Version="5.4.21" />
+    <PackageReference Include="UnityEngine.Modules" Version="2021.3.33" IncludeAssets="compile" />
+
+    <!-- Публицированные библиотеки игры (лежат на nuget.bepinex.dev). 1.*-* = самая свежая, включая пре-релизы. -->
+    <PackageReference Include="RiskOfRain2.GameLibs" Version="1.*-*" IncludeAssets="compile" />
+
+    <!-- On.* хуки. Версия под игру 1.5.0 (октябрь 2026). -->
+    <PackageReference Include="MMHOOK.RoR2" Version="2026.10.8" IncludeAssets="compile" />
+
+    <PackageReference Include="R2API.Core" Version="5.*" />
+    <PackageReference Include="R2API.Items" Version="1.*" />
+    <PackageReference Include="R2API.Language" Version="1.*" />
+    <PackageReference Include="R2API.Networking" Version="1.*" />
+    <PackageReference Include="R2API.Elites" Version="1.*" />
+    <PackageReference Include="R2API.ContentManagement" Version="1.*" />
+    <!-- 1.6.4+ нужен из-за args.allSkills (перезарядка) -->
+    <PackageReference Include="R2API.RecalculateStats" Version="1.6.*" />
+
+    <!-- Меню настроек в игре. Зависимость мягкая: без Risk of Options мод тоже работает. -->
+    <PackageReference Include="Rune580.Mods.RiskOfRain2.RiskOfOptions" Version="2.8.*" />
+  </ItemGroup>
+
+  <!--
+    Автокопирование в профиль r2modman после сборки.
+    Укажи путь к папке plugins своего профиля, например:
+      dotnet build -p:ProfilePlugins="C:\Users\1342c\AppData\Roaming\r2modmanPlus-local\RiskOfRain2\profiles\Diabloid\BepInEx\plugins"
+    или пропиши его один раз в Directory.Build.props.user (см. README).
+  -->
+  <Import Project="..\..\Directory.Build.props.user" Condition="Exists('..\..\Directory.Build.props.user')" />
+
+  <Target Name="CopyToProfile" AfterTargets="Build" Condition="'$(ProfilePlugins)' != ''">
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(ProfilePlugins)\Diabloid" />
+    <Message Importance="high" Text="Diabloid.dll скопирован в $(ProfilePlugins)\Diabloid" />
+  </Target>
+
+</Project>

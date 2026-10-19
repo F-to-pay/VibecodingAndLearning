@@ -1,0 +1,12 @@
+<!--
+  Скопируй этот файл в Directory.Build.props.user (без .example) и поправь путь.
+  Тогда каждый `dotnet build` будет сам класть Diabloid.dll в профиль r2modman.
+  Файл .user в git не попадает (см. .gitignore).
+
+  Путь к профилю: r2modman → Settings → Browse profile folder → там BepInEx\plugins
+-->
+<Project>
+  <PropertyGroup>
+    <ProfilePlugins>C:\Users\1342c\AppData\Roaming\r2modmanPlus-local\RiskOfRain2\profiles\Default\BepInEx\plugins</ProfilePlugins>
+  </PropertyGroup>
+</Project>
