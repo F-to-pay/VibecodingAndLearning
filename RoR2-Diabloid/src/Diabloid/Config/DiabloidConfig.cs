@@ -33,6 +33,7 @@ namespace Diabloid.Config
         public const string SectionBalance = "Balance";
         public const string SectionVisuals = "Visuals";
         public const string SectionUI = "UI";
+        public const string SectionDebug = "Debug";
 
         // --- Дроп ---
         public static ConfigEntry<float> NormalDropChance;
@@ -51,15 +52,27 @@ namespace Diabloid.Config
         public static ConfigEntry<float> ImplicitMultiplier;
         public static ConfigEntry<float> DuplicateStatChance;
         public static ConfigEntry<float> CooldownReductionCap;
+        public static ConfigEntry<float> RadianceEnemyStats; // 0.19.0
+        public static ConfigEntry<float> RadianceSpawnRate;
+        public static ConfigEntry<float> RecycleXp;            // 0.20.0
+        public static ConfigEntry<float> RecycleForgottenShare;
+        public static ConfigEntry<KeyboardShortcut> BurnKey;
 
         // --- Внешний вид ---
         public static ConfigEntry<string>[] SlotModels;
+
+        /// <summary>Запасные модельки (базовая игра), если предмета из настройки нет — например, без DLC.</summary>
+        public static readonly string[] FallbackModels = { "Crowbar", "GhostOnKill", "ArmorPlate", "FireRing", "SprintOutOfCombat", "Hoof" };
 
         // --- Интерфейс ---
         public static ConfigEntry<KeyboardShortcut> PanelKey;
         public static ConfigEntry<bool> AnnounceInChat;
         public static ConfigEntry<float> PanelScale;
         public static ConfigEntry<bool> ShowPerkAura;
+
+        // --- Отладка ---
+        public static ConfigEntry<bool> DebugMenuEnabled;
+        public static ConfigEntry<KeyboardShortcut> DebugKey;
 
         private static readonly List<OptionInfo> options = new List<OptionInfo>();
 
@@ -166,9 +179,41 @@ namespace Diabloid.Config
                           "Максимальное суммарное сокращение перезарядки со шмоток, в %."),
                 0f, 90f, "{0:0}%");
 
+            // 0.19.0 — сияние (Gameplay/Radiance.cs).
+            // 0.20.1: 2 → 4% (решение пользователя). Новый ключ — BepInEx не обновляет сохранённое значение при смене дефолта.
+            RadianceEnemyStats = Bind(cfg, SectionBalance, "RadianceEnemyStatsV2", 4f,
+                new Words("Radiance: enemy stats", "Сияние: статы врагов"),
+                new Words("Every piece of gear gives Radiance by quality (common 1, uncommon 2, rare 3, legendary 5, void 4, lunar 0; book 1, scroll 2). " +
+                          "Each level of Radiance (averaged over players) gives enemies this many % health, damage, armor and regen. 0 = off.",
+                          "Каждая шмотка даёт сияние по качеству (обычная 1, необычная 2, редкая 3, легендарка 5, пустотная 4, лунная 0; книга 1, свиток 2). " +
+                          "Каждый уровень сияния (в среднем по игрокам) даёт врагам столько % здоровья, урона, брони и регена. 0 — выключено."),
+                0f, 10f, "{0:0.#}%");
+
+            RadianceSpawnRate = Bind(cfg, SectionBalance, "RadianceSpawnRate", 3f,
+                new Words("Radiance: spawn rate", "Сияние: скорость спавна"),
+                new Words("Each level of Radiance (averaged over players) speeds up enemy spawning by this many % (director credits). 0 = off.",
+                          "Каждый уровень сияния (в среднем по игрокам) ускоряет спавн врагов на столько % (кредиты директора). 0 — выключено."),
+                0f, 10f, "{0:0.#}%");
+
+            // 0.20.0 — переработка шмота в опыт (Gameplay/GearRecycling.cs).
+            RecycleXp = Bind(cfg, SectionBalance, "RecycleXp", 1f,
+                new Words("Recycling: XP multiplier", "Переработка: множитель опыта"),
+                new Words("Burning gear gives XP like a regular monster of the gear's level, times quality " +
+                          "(common 1, uncommon 2, rare 4, legendary 10, lunar/void 6; book 3, scroll 4), times this multiplier.",
+                          "Сожжённая шмотка даёт опыт как обычный моб её уровня, умноженный на качество " +
+                          "(обычная 1, необычная 2, редкая 4, легендарка 10, лунная/пустотная 6; книга 3, свиток 4), и на этот множитель."),
+                0f, 10f, "x{0:0.##}");
+
+            RecycleForgottenShare = Bind(cfg, SectionBalance, "RecycleForgottenShare", 50f,
+                new Words("Recycling: forgotten gear", "Переработка: забытый шмот"),
+                new Words("Gear and books left on the ground when you leave a stage are recycled for this share (in %) of the burn XP, given at the start of the next stage.",
+                          "Шмот и книги, оставленные на земле при уходе с этапа, перерабатываются за эту долю (в %) опыта от сжигания — приходит в начале следующего этапа."),
+                0f, 100f, "{0:0}%");
+
             // Модельки берём у ванильных предметов по их внутреннему имени (ItemCatalog).
             // Применяются один раз при загрузке игры — отсюда restartRequired.
-            string[] defaultModels = { "Crowbar", "GhostOnKill", "ArmorPlate", "FireRing", "SprintOutOfCombat", "Hoof" };
+            // 0.16.0: оружие — Tri-Tip Dagger (BleedOnHit), ботинки — Hiker's Boots (CritAtLowerElevation, Alloyed Collective).
+            string[] defaultModels = { "BleedOnHit", "GhostOnKill", "ArmorPlate", "FireRing", "SprintOutOfCombat", "CritAtLowerElevation" };
             SlotModels = new ConfigEntry<string>[Slots.Count];
             for (int i = 0; i < Slots.Count; i++)
             {
@@ -185,6 +230,11 @@ namespace Diabloid.Config
                 new Words("Equipment panel key", "Клавиша панели экипировки"),
                 new Words("Key that toggles the equipment panel.",
                           "Клавиша, открывающая панель экипировки."));
+
+            BurnKey = Bind(cfg, SectionUI, "BurnKey", new KeyboardShortcut(KeyCode.X),
+                new Words("Burn gear key", "Клавиша сжигания шмота"),
+                new Words("Look at gear or a book on the ground (the one highlighted for pick up) and press this key to burn it for XP.",
+                          "Смотришь на шмотку или книгу на земле (ту, что подсвечена для подбора) и жмёшь эту клавишу — она сгорает в опыт."));
 
             PanelScale = Bind(cfg, SectionUI, "PanelScale", 1f,
                 new Words("Equipment panel scale", "Масштаб панели экипировки"),
@@ -204,6 +254,16 @@ namespace Diabloid.Config
 
             // Элитки и артефакт — в соседнем файле DiabloidConfig.Elites.cs.
             BindElites(cfg);
+
+            DebugMenuEnabled = Bind(cfg, SectionDebug, "DebugMenu", false,
+                new Words("Debug menu", "Отладочное меню"),
+                new Words("Allow the debug menu: spawn gear of any slot and quality and any book (host only).",
+                          "Разрешить отладочное меню: создать шмотку любого слота и качества и любую книгу (только хост)."));
+
+            DebugKey = Bind(cfg, SectionDebug, "DebugKey", new KeyboardShortcut(KeyCode.F3),
+                new Words("Debug menu key", "Клавиша отладочного меню"),
+                new Words("Key that toggles the debug menu (works only if the debug menu is allowed).",
+                          "Клавиша, открывающая отладочное меню (работает, только если меню разрешено)."));
         }
 
         /// <summary>Обёртка над cfg.Bind: заодно запоминает всё, что нужно для игрового меню.</summary>

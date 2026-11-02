@@ -45,7 +45,9 @@ namespace Diabloid.Loot
         /// <summary>Значение аффикса на 1 уровне, обычное качество, бросок 100%.</summary>
         public readonly float BaseValue;
 
-        /// <summary>Сколько долей от BaseValue добавляется за каждый уровень предмета.</summary>
+        /// <summary>
+        /// Рост за уровень предмета: доля от BaseValue (линейно) или множитель (1 + x) за уровень (Geometric).
+        /// </summary>
         public readonly float LevelScaling;
 
         /// <summary>До скольки знаков округлять выпавшее значение.</summary>
@@ -55,6 +57,16 @@ namespace Diabloid.Loot
         /// Значение всегда ровно BaseValue: качество, бросок, уровень и множители не влияют (прыжки: всегда +1).
         /// </summary>
         public readonly bool FixedValue;
+
+        /// <summary>
+        /// Рост от уровня геометрический: (1 + LevelScaling)^(уровень − 1). Так растут проценты (0.17.0):
+        /// старая шмотка устаревает за одно и то же число уровней на любом этапе забега.
+        /// Плоские статы растут линейно — как сам персонаж (+30% здоровья, +20% урона за уровень).
+        /// </summary>
+        public readonly bool Geometric;
+
+        /// <summary>Проклятие этого стата не растёт с уровнем шмотки (урон, 0.19.0: иначе к 60-му уровню −97% урона).</summary>
+        public readonly bool StaticCurse;
 
         /// <summary>
         /// База для проклятий (лунных и пустотных). Обычно равна BaseValue, но у здоровья и регена
@@ -76,7 +88,7 @@ namespace Diabloid.Loot
 
         public StatInfo(StatType type, float baseValue, float levelScaling, int decimals,
                         Words format, string prefixEn, string[] prefixRu, Words suffix, float curseBaseValue = -1f,
-                        bool fixedValue = false)
+                        bool fixedValue = false, bool geometric = false, bool staticCurse = false)
         {
             if (prefixRu == null || prefixRu.Length != 4)
                 throw new ArgumentException("Need exactly 4 Russian adjective forms", nameof(prefixRu));
@@ -85,6 +97,8 @@ namespace Diabloid.Loot
             BaseValue = baseValue;
             CurseBaseValue = curseBaseValue > 0f ? curseBaseValue : baseValue;
             FixedValue = fixedValue;
+            Geometric = geometric;
+            StaticCurse = staticCurse;
             LevelScaling = levelScaling;
             Decimals = decimals;
             this.format = format;
@@ -123,22 +137,22 @@ namespace Diabloid.Loot
             new StatInfo(StatType.Damage,            6f,   0.03f,    1,
                 new Words("+{0}% damage", "+{0}% к урону"),
                 "Savage", new[] { "свирепый", "свирепая", "свирепое", "свирепые" },
-                new Words("of Fury", "ярости")),
+                new Words("of Fury", "ярости"), geometric: true, staticCurse: true),
 
             new StatInfo(StatType.AttackSpeed,       6f,   0.03f,    1,
                 new Words("+{0}% attack speed", "+{0}% к скорости атаки"),
                 "Swift", new[] { "быстрый", "быстрая", "быстрое", "быстрые" },
-                new Words("of the Whirlwind", "вихря")),
+                new Words("of the Whirlwind", "вихря"), geometric: true),
 
             new StatInfo(StatType.CritChance,        3f,   0.02f,    1,
                 new Words("+{0}% crit chance", "+{0}% к шансу крита"),
                 "Keen", new[] { "точный", "точная", "точное", "точные" },
-                new Words("of the Hawk", "ястреба")),
+                new Words("of the Hawk", "ястреба"), geometric: true),
 
             new StatInfo(StatType.CritDamage,        10f,  0.03f,    0,
                 new Words("+{0}% crit damage", "+{0}% к урону крита"),
                 "Cruel", new[] { "жестокий", "жестокая", "жестокое", "жестокие" },
-                new Words("of the Executioner", "палача")),
+                new Words("of the Executioner", "палача"), geometric: true),
 
             // Здоровье со шмоток урезано втрое (было 25 и 5%). Реген: 0.8 → ×2 (0.5.0) → ÷3 (0.8.4) = 1.6/3.
             // Проклятия считаются от старых баз — см. CurseBaseValue.
@@ -150,19 +164,21 @@ namespace Diabloid.Loot
             new StatInfo(StatType.MaxHealthPercent,  5f / 3f, 0.02f,  1,
                 new Words("+{0}% max health", "+{0}% к здоровью"),
                 "Mighty", new[] { "могучий", "могучая", "могучее", "могучие" },
-                new Words("of the Titan", "титана"), curseBaseValue: 5f),
+                new Words("of the Titan", "титана"), curseBaseValue: 5f, geometric: true),
 
             new StatInfo(StatType.Regen,             1.6f / 3f, 0.20f, 1,
                 new Words("+{0} HP/s regen", "+{0} ОЗ/с к регенерации"),
                 "Vital", new[] { "живучий", "живучая", "живучее", "живучие" },
                 new Words("of the Troll", "тролля"), curseBaseValue: 0.8f),
 
-            new StatInfo(StatType.Armor,             5f,   0.05f,    1,
+            // Броня растёт геометрически, поэтому 0.05 → 0.03 (иначе к 100-му уровню сотни брони).
+            new StatInfo(StatType.Armor,             5f,   0.03f,    1,
                 new Words("+{0} armor", "+{0} к броне"),
                 "Reinforced", new[] { "прочный", "прочная", "прочное", "прочные" },
-                new Words("of the Turtle", "черепахи")),
+                new Words("of the Turtle", "черепахи"), geometric: true),
 
-            new StatInfo(StatType.Shield,            20f,  0.30f,    0,
+            // 0.17.0: щит урезан втрое, как здоровье (был 20 — щит на шлеме был лучше здоровья, главного стата шлема).
+            new StatInfo(StatType.Shield,            20f / 3f, 0.30f, 0,
                 new Words("+{0} shield", "+{0} к щиту"),
                 "Shimmering", new[] { "мерцающий", "мерцающая", "мерцающее", "мерцающие" },
                 new Words("of the Mirage", "миража")),
@@ -170,7 +186,7 @@ namespace Diabloid.Loot
             new StatInfo(StatType.MoveSpeed,         5f,   0.01f,    1,
                 new Words("+{0}% movement speed", "+{0}% к скорости передвижения"),
                 "Fleet", new[] { "лёгкий", "лёгкая", "лёгкое", "лёгкие" },
-                new Words("of the Wind", "ветра")),
+                new Words("of the Wind", "ветра"), geometric: true),
 
             new StatInfo(StatType.CooldownReduction, 4f,   0.00f,    1,
                 new Words("-{0}% cooldowns", "-{0}% к перезарядке"),
@@ -180,9 +196,11 @@ namespace Diabloid.Loot
             new StatInfo(StatType.JumpPower,         8f,   0.01f,    0,
                 new Words("+{0}% jump power", "+{0}% к силе прыжка"),
                 "Springy", new[] { "прыгучий", "прыгучая", "прыгучее", "прыгучие" },
-                new Words("of the Grasshopper", "кузнечика")),
+                new Words("of the Grasshopper", "кузнечика"), geometric: true),
 
-            new StatInfo(StatType.HealOnHit,         2f,   0.30f,    1,
+            // 0.17.0: рост 0.30 → 0.03 (линейно). Умножается на скорострельность — на 20-м уровне легендарный аффикс
+            // давал ~38 ОЗ за попадание, у Коммандо это ~30% здоровья в секунду. Растить за уровень — Вампиризм.
+            new StatInfo(StatType.HealOnHit,         2f,   0.03f,    1,
                 new Words("+{0} HP on hit", "+{0} ОЗ за попадание"),
                 "Vampiric", new[] { "вампирский", "вампирская", "вампирское", "вампирские" },
                 new Words("of the Leech", "пиявки")),
@@ -212,7 +230,7 @@ namespace Diabloid.Loot
             new StatInfo(StatType.SprintSpeed,       5f,   0.01f,    1,
                 new Words("+{0}% sprint speed", "+{0}% к скорости бега"),
                 "Rushing", new[] { "стремительный", "стремительная", "стремительное", "стремительные" },
-                new Words("of the Cheetah", "гепарда")),
+                new Words("of the Cheetah", "гепарда"), geometric: true),
 
             // Слабый: ~1 на 1-м уровне, растёт как урон монстров (+20% за уровень), иначе к 3-му этапу ничего не значит.
             new StatInfo(StatType.DamageBlock,       1f,   0.20f,    1,
@@ -243,10 +261,12 @@ namespace Diabloid.Loot
             StatType.MoveSpeed,
             StatType.Regen,
             StatType.CooldownReduction,
-            // Урон убран из проклятий в 0.8.4: "-30% урона" слишком некомфортно. Вместо него — сила прыжка:
+            // Урон убирали в 0.8.4 ("-30% урона" слишком некомфортно), вместо него появилась сила прыжка:
             // пул должен быть не меньше 6, иначе шмотка, у которой 4 стата из пула уже заняты бонусами,
             // получит меньше 2 проклятий (у лунной: главный + 3 аффикса = 4).
             StatType.JumpPower,
+            // 0.19.0: урон вернулся — лунные единственные без сияния, нужна плата. Статичный (StaticCurse): −16…18%.
+            StatType.Damage,
         };
 
         /// <summary>Самопроверка: порядок в массиве совпадает с enum. Дёргается из плагина и симулятора.</summary>

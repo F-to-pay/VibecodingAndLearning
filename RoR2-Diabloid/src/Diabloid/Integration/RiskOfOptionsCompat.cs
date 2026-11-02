@@ -37,6 +37,7 @@ namespace Diabloid.Integration
             { DiabloidConfig.SectionClockmaker,  new Words("Elite: Clockmaker", "Элитка: Часовщик") },
             { DiabloidConfig.SectionPower,       new Words("Elite: Power", "Элитка: Сила") },
             { DiabloidConfig.SectionArtifacts,   new Words("Artifacts", "Артефакты") },
+            { DiabloidConfig.SectionDebug,       new Words("Debug", "Отладка") },
         };
 
         [MethodImpl(MethodImplOptions.NoInlining)]
@@ -48,9 +49,9 @@ namespace Diabloid.Integration
             // Описание мода в меню.
             GameLanguage.AddToken("DIABLOID_OPTIONS_DESCRIPTION", new Words(
                 "Diablo-like loot: enemies drop gear for 6 slots with procedurally rolled stats and 7 qualities (incl. Lunar and Void). " +
-                "Press E on gear to equip it, F2 opens the equipment panel. Also: 4 new elites, Artifacts of Elitism and Gear.",
+                "Press E on gear to equip it, F2 opens the equipment panel. Also: 4 new elites, Artifacts of Elitism, Gear, Impatience and the Shapeshifter.",
                 "Диаблоидный лут: с врагов падают шмотки для 6 слотов с процедурными статами и 7 качествами (включая лунное и пустотное). " +
-                "E на шмотке — надеть, F2 — панель экипировки. А ещё 4 новые элитки и артефакты элитаризма и снаряжения."));
+                "E на шмотке — надеть, F2 — панель экипировки. А ещё 4 новые элитки и артефакты элитаризма, снаряжения, нетерпения и перевёртыша."));
             ModSettingsManager.SetModDescriptionToken("DIABLOID_OPTIONS_DESCRIPTION", guid, name);
 
             var namedCategories = new HashSet<string>();

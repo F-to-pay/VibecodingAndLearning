@@ -36,6 +36,7 @@ namespace Diabloid.UI
         private int textStyleFontSize;
         private GearSet shownGear;
         private readonly float[] totals = new float[Stats.Count];
+        private float soulDamage; // перк "души" (0.14.0): копится в скрытом предмете, не в шмотках
 
         private enum Layout { OneColumn, TwoColumns, ThreeColumns, ThreeColumnsScrolled }
 
@@ -56,6 +57,7 @@ namespace Diabloid.UI
             if (!master) return;
 
             shownGear = GearRegistry.Find(master);
+            soulDamage = PerkManager.KillDamageOf(master.inventory);
             EnsureStyles();
 
             Array.Clear(totals, 0, totals.Length);
@@ -118,7 +120,9 @@ namespace Diabloid.UI
             int stats = 0;
             foreach (float value in totals)
                 if (Math.Abs(value) >= 0.0001f) stats++;
-            if (shownGear?.BookPerk != null) lines += 2; // "Книга:" + перк
+            if (shownGear != null && shownGear.BookPerks.Count > 0) lines += 1 + shownGear.BookPerks.Count; // "Книга:" + перки
+            if (soulDamage > 0f) lines += 1;
+            lines += 1; // сияние (0.19.0)
             return lines + Math.Max(1, stats);
         }
 
@@ -215,7 +219,9 @@ namespace Diabloid.UI
 
                 string score = item.Score.ToString("0.0", CultureInfo.InvariantCulture);
                 string level = item.ScalesWithMonsterLevel ? $"{item.Level}↑" : item.Level.ToString();
-                GUILayout.Label($"{header}{item.ColoredName} <color=#888888>[{Loc.T("lvl", "ур.")} {level}, {Loc.T("power", "сила")} {score}]</color>", textStyle);
+                int radiance = Qualities.Get(item.Quality).Radiance;
+                string glow = radiance > 0 ? $", <color=#FFE680>{Loc.T("radiance", "сияние")} {radiance}</color>" : "";
+                GUILayout.Label($"{header}{item.ColoredName} <color=#888888>[{Loc.T("lvl", "ур.")} {level}, {Loc.T("power", "сила")} {score}{glow}]</color>", textStyle);
 
                 // Главный стат — белым, остальные аффиксы — голубым, проклятия — красным, как в Диабло.
                 GUILayout.Label("      <color=#FFFFFF>" + item.Implicit.Describe() + "</color>", textStyle);
@@ -225,6 +231,21 @@ namespace Diabloid.UI
                 foreach (var perk in item.Perks)
                     GUILayout.Label("      <color=#FFCC55>★ " + perk.Describe(item.Level) + "</color>", textStyle);
             }
+        }
+
+        /// <summary>«Сияние: 17 → враги +34% здоровья, урона, брони и регена, спавн +51%». В коопе — ещё своё.</summary>
+        private void DrawRadiance()
+        {
+            float current = RadianceManager.Current;
+            int mine = shownGear != null ? shownGear.Radiance() : 0;
+            string value = current.ToString("0.#", CultureInfo.InvariantCulture);
+            if (Math.Abs(current - mine) > 0.05f)
+                value += $" ({Loc.T("yours", "твоё")} {mine}, {Loc.T("averaged over players", "среднее по игрокам")})";
+            string stats = (RadianceManager.EnemyStatBonus * 100f).ToString("0", CultureInfo.InvariantCulture);
+            string spawn = (RadianceManager.SpawnBonus * 100f).ToString("0", CultureInfo.InvariantCulture);
+            GUILayout.Label("      <color=#FFE680>" + Loc.T("Radiance", "Сияние") + ": " + value + " → " +
+                            Loc.T($"enemies +{stats}% health, damage, armor and regen, spawns +{spawn}%",
+                                  $"враги +{stats}% здоровья, урона, брони и регена, спавн +{spawn}%") + "</color>", textStyle);
         }
 
         private void DrawTotals()
@@ -247,12 +268,20 @@ namespace Diabloid.UI
             if (!any)
                 GUILayout.Label("      <color=#666666>" + Loc.T("nothing yet. Go kill something.", "ничего. Иди убивай.") + "</color>", textStyle);
 
+            DrawRadiance();
+
+            if (soulDamage > 0f)
+                GUILayout.Label("      <color=#B48CFF>" + Loc.T("Souls", "Души") + ": +" +
+                                soulDamage.ToString("0.##", CultureInfo.InvariantCulture) + " " +
+                                Loc.T("base damage", "к базовому урону") + "</color>", textStyle);
+
             // Перк книги (пока книга в слоте снаряжения).
-            var book = shownGear?.BookPerk;
-            if (book.HasValue)
+            if (shownGear != null && shownGear.BookPerks.Count > 0)
             {
-                GUILayout.Label("<b>" + Loc.T("Book:", "Книга:") + "</b>", textStyle);
-                GUILayout.Label("      <color=#FFCC55>★ " + book.Value.Describe(shownGear.BookPerkLevel) + "</color>", textStyle);
+                bool scroll = shownGear.BookPerks.Count > 1;
+                GUILayout.Label("<b>" + (scroll ? Loc.T("Scroll:", "Свиток:") : Loc.T("Book:", "Книга:")) + "</b>", textStyle);
+                foreach (var perk in shownGear.BookPerks)
+                    GUILayout.Label("      <color=#FFCC55>★ " + perk.Describe(shownGear.BookPerkLevel) + "</color>", textStyle);
             }
         }
     }

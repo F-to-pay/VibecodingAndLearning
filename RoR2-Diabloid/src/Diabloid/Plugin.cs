@@ -35,7 +35,7 @@ namespace Diabloid
     {
         public const string PluginGUID = "FToPay.Diabloid";
         public const string PluginName = "Diabloid";
-        public const string PluginVersion = "0.11.2";
+        public const string PluginVersion = "0.20.1";
 
         internal static ManualLogSource Log;
 
@@ -67,6 +67,8 @@ namespace Diabloid
             DiabloidElites.Register();
             ElitismArtifact.Register();
             GearArtifact.Register();
+            ImpatienceArtifact.Register();
+            ShapeshifterArtifact.Register();
             EliteHooks.Init();
             RoR2Application.onLoad += DiabloidElites.OnCatalogsReady;
             PerkManager.Register();
@@ -79,11 +81,16 @@ namespace Diabloid
             LootDrops.Init();
             GearStats.Init();
             GearLifecycle.Init();
+            RadianceManager.Init();
+            GearRecycling.Init();
 
             gameObject.AddComponent<GearPanel>();
+            gameObject.AddComponent<DebugMenu>();
             gameObject.AddComponent<EliteManager>();
             gameObject.AddComponent<PerkManager>();
             gameObject.AddComponent<BookRunner>();
+            gameObject.AddComponent<RadianceManager>();
+            gameObject.AddComponent<GearRecycling>();
 
             // Проверка через IsInstalled вынесена отдельно от вызова Init: так типы Risk of Options
             // не трогаются вообще, если мода нет (см. комментарий в RiskOfOptionsCompat).

@@ -62,6 +62,7 @@
 | `Gameplay/LootDrops.cs` | дроп с врагов, лунные/пустотные мобы |
 | `Gameplay/GearPickup.cs` | подбор по E, замена, сброс старой шмотки на землю |
 | `Gameplay/GearPerks.cs` | перки в игре: `PerkManager` (тики ауры и регена, броня, удар, берсерк), сфера ауры |
+| `Gameplay/GearPerks.New.cs` | перки 0.14.0: души, заражение (`InfectionDot`), замедление, удача, отражение |
 | `Books/GearBooks.cs` | книги: свои EquipmentDef, активация, призыв босса, статы босса от героя |
 | `Gameplay/GearStats.cs` | шмотки → статы, лечение за попадание и вампиризм, плоский резист, пересчёт при росте уровня монстров |
 | `Gameplay/GearRegistry.cs` | кто что носит (ключ — netId мастера); `FindWorn` — турели Инженера носят шмотки хозяина |
@@ -70,6 +71,7 @@
 | `Gameplay/LootRoller.cs` | серверный Random + текущий уровень + конфиг → генератор |
 | `Network/GearSyncMessage.cs` | сериализация экипировки и рассылка клиентам |
 | `UI/GearPanel.cs` | панель F2 на IMGUI с автораскладкой в колонки |
+| `UI/DebugMenu.cs` | отладочное меню F3 (0.12.0): шмотка любого слота/качества, любая книга — только хост |
 
 **Элитки, артефакты, настройки**
 
@@ -83,6 +85,8 @@
 | `Elites/ElitismArtifact.cs` | артефакт элитаризма |
 | `Elites/TextureFactory.cs` | рампы цвета элиток и иконки артефактов, нарисованные кодом |
 | `Artifacts/GearArtifact.cs` | артефакт снаряжения: предметы → шмотки, без принтеров, медленная сложность |
+| `Artifacts/ShapeshifterArtifact.cs` | артефакт перевёртыша (0.16.0): книга перевёртыша в начале забега |
+| `Artifacts/ImpatienceArtifact.cs` | артефакт нетерпения: зарядка телепорта −90% (calcChargeRate ×10) |
 | `Config/DiabloidConfig.cs` | настройки лута и интерфейса + названия/описания на двух языках |
 | `Config/DiabloidConfig.Elites.cs` | настройки элиток и артефактов |
 | `Integration/RiskOfOptionsCompat.cs` | меню в игре (мягкая зависимость) |
@@ -95,16 +99,28 @@
 Шмотка = **главный стат слота** (×1.5) + N аффиксов из пула слота. N зависит от качества.
 
 ```
-значение = база стата × множитель качества × (1 + рост_за_уровень × множитель_роста × (уровень − 1))
-           × бросок[RollMin..1] × общий множитель
+значение = база стата × множитель качества × рост(уровень) × бросок[RollMin..1] × общий множитель
+
+рост(уровень) = 1 + r × m × (уровень − 1)          плоские статы (линейно)
+рост(уровень) = (1 + r × m)^(уровень − 1)          проценты, StatInfo.Geometric (0.17.0)
 ```
+r — `LevelScaling` стата, m — `LevelScalingMultiplier` из конфига.
 
 Округляется до знаков стата, ноль не выпадает: минимум один шаг (у проклятий — минус один шаг).
-Плоские статы (здоровье, щит, реген) растут с уровнем сильно, как и сами персонажи; проценты — слабо;
+Плоские статы (здоровье, щит, реген, базовый урон, резист) растут линейно, как сами персонажи; проценты —
+геометрически с малым шагом (урон/скорость атаки/урон крита/броня 1.03, крит и % здоровья 1.02, скорости и прыжок 1.01);
 перезарядка не растёт вообще, и у её суммы потолок 50%.
 
+Баланс 0.17.0 («раннее устаревание»): разрыв качеств сжат урезанием верхних (см. таблицу), чтобы строку легендарки
+догоняли уровнем. Геометрический рост даёт одинаковое время догона на любом этапе: строка легендарки ≈ 1.29 редкой,
+1.55 необычной, 1.9 обычной → при шаге 1.03 редкая догоняет за ~9 уровней, необычная за ~15, обычная за ~22
+(при шаге 1.01 — в три раза дольше). При линейном росте догон замедляется с уровнем и выше некоторого уровня
+невозможен вообще. Щит урезан втрое, как здоровье (20 → 6.7). Лечение за попадание: рост 0.30 → 0.03 линейно
+(умножается на скорострельность, на 20-м уровне давало ~30% здоровья в секунду). Броня: 0.05 → 0.03 (геометрически).
+
 Баланс 0.5.0: здоровье со шмоток урезано втрое (плоское 25 → 8.3, % 5 → 1.67), реген удвоен (0.8 → 1.6);
-в 0.8.4 реген урезан втрое (1.6 → 0.53), а урон убран из пула проклятий.
+в 0.8.4 реген урезан втрое (1.6 → 0.53), а урон убран из пула проклятий (в 0.19.0 вернулся, но статичный —
+`StatInfo.StaticCurse`: проклятие роллится на 1-м уровне, всегда −16.2…18%).
 Проклятиям это не нужно, поэтому у стата есть отдельная `CurseBaseValue` (у здоровья — старые 5%, у регена —
 старые 0.8), и проклятие роллится от неё. Сила аффикса (`Strength`) у проклятий тоже меряется от неё.
 
@@ -113,12 +129,12 @@
 | Качество | Сила | `RollMin` | Аффиксов | Вес | Особое |
 |---|---|---|---|---|---|
 | Обычное | ×1.0 | 0.5 | 1 | 60 | — |
-| Необычное | ×1.3 | 0.6 | 2 | 25 | — |
-| Редкое | ×1.7 | 0.7 | 3 | 10 | — |
-| ~~Эпическое~~ | ×2.2 | 0.8 | 4 | — | вырезано в 0.5.0 |
-| Легендарное | ×3.0 | 0.9 | 5 | 1 | — |
-| Лунное | ×4.0 | 0.9 | 3 | — | +2 проклятия ×6 |
-| Пустотное | ×2.2 | 0.8 | 4 | — | уровень = уровню монстров; +1 проклятие: −% регена |
+| Необычное | ×1.15 | 0.6 | 2 | 25 | — |
+| Редкое | ×1.3 | 0.7 | 3 | 10 | — |
+| ~~Эпическое~~ | ×1.4 | 0.8 | 4 | — | вырезано в 0.5.0 |
+| Легендарное | ×1.5 | 0.9 | 5 | 1 | — |
+| Лунное | ×2.0 | 0.9 | 3 | — | +2 проклятия ×3 (0.17.0; было ×4 / ×6) |
+| Пустотное | ×1.4 | 0.8 | 4 | — | уровень = уровню монстров; +1 проклятие: −% регена |
 
 **Удача** умножает вес i-го качества на (1 + удача)^i, где i — номер в enum (у легендарки по-прежнему 4).
 Из симулятора (100k бросков):
@@ -163,11 +179,11 @@ coefficient 0 (DoT) не лечат вовсе. `MoveSpeed` теперь наз�
 | Перк | Из броска t | Где работает |
 |---|---|---|
 | `DamageAura` | радиус 10→50, урон 80→20% базового/с | сервер, `PerkManager.FixedUpdate` раз в 0.5 с: `TakeDamage` + `OnHitEnemy`/`OnHitAll` с proc 0.1, крит роллится |
-| `ArmorOnHurt` | порог = сила = 10→50% макс. ХП | сервер: `onServerDamageDealt` по жертве-игроку копит урон на каждый перк; порог → броня `% × fullHealth / 10` на 5 с в `PerkBodyState`, бафф-иконка `bdDiabloidPerkArmor` |
+| `ArmorOnHurt` | **убран в 0.17.1** (`Perks.IsRetired`, место в enum — сеть) | был: сервер: `onServerDamageDealt` по жертве-игроку копит урон на каждый перк; порог → броня `% × fullHealth / 10` на 5 с в `PerkBodyState`, бафф-иконка `bdDiabloidPerkArmor` |
 | `PercentHpStrike` | шанс 8→40%, урон 5→1% макс. ХП | сервер: `onServerDamageDealt` по атакующему, `Util.CheckRoll(шанс × proc)`, удар с proc 0 — сам себя не вызывает; `victimIsBoss` → ×0.2 |
-| `Berserk` | — | все машины: `baseDamageAdd += шаги × LevelScale(BaseDamage, уровень шмотки)`; `PerkManager.Update` дёргает пересчёт статов, когда число "недостающих 70" меняется |
-| `MissingHpRegen` | — | сервер: каждый физический кадр `Heal(1% × недостающее × dt, nonRegen: false)` |
-| `HealthArmor` | — | все машины: `armorAdd += 2% × maxHealth` (с прошлого пересчёта; `Update` дёргает пересчёт при смене maxHealth), `baseDamageAdd += 0.1 × эта броня` |
+| `Berserk` | — | все машины: `baseDamageAdd += шаги × LevelScale(BaseDamage, уровень шмотки)`; `PerkManager.Update` дёргает пересчёт статов, когда число "недостающих 10% макс. ХП" (0.17.1; было 70 ХП) меняется |
+| `MissingHpRegen` | — | сервер: каждый физический кадр, если не фул ХП, `Heal((0.5% × fullHealth + 3% × health) × перков × dt, nonRegen: false)` (0.17.1; было 1% недостающего) |
+| `HealthArmor` | — | все машины: `armorAdd += 4% × maxHealth` (с прошлого пересчёта; `Update` дёргает пересчёт при смене maxHealth), `baseDamageAdd += 0.1 × эта броня` |
 | `WispOnKill` | — | сервер: `onCharacterDeathGlobal`, `Util.CheckRoll(15, убийца)` → `MasterSummon("WispMaster")` + `MasterSuicideOnTimer` 120 с |
 | `GolemSummon` | — | сервер: таймер в `PerkBodyState` (первый через 3 с, потом раз в 30) → `MasterSummon("GolemMaster")` на 60 с у ближайшей наземной ноды + бафф `bdDiabloidMiniGolem`: в статах скорость +100%, урон −70%; по баффу на каждой машине `ModelScaler` ×0.5 (держит масштаб каждый кадр). Тело после `Perform` может появиться позже — тогда бафф через `master.onBodyStart` (в 0.8.0–0.8.1 из-за этого голем был обычным). Смерть голема пишется в лог: `Perks: mini golem died after …` |
 | `SprintWarcry` | — | сервер раз в 0.5 с, если `isSprinting`: бафф `bdDiabloidPerkWarcry` на 1 с всем своей команды в 30 м; в статах `baseDamageAdd += 20% × (baseDamage + levelDamage × (level − 1))`. Бафф не стакается |
@@ -183,19 +199,40 @@ coefficient 0 (DoT) не лечат вовсе. `MoveSpeed` теперь наз�
 
 | Перк | Где работает |
 |---|---|
-| `XpBonus` | хук `TeamManager.GiveTeamExperience`: опыт команды игроков × (1 + 0.1 × число перков у всех игроков) |
+| `XpBonus` | хук `TeamManager.GiveTeamExperience`: опыт команды игроков × (1 + 0.5 × число перков у всех игроков). 0.17.0: плата — `damage/attackSpeed/health/shield/regen/armor/moveSpeedTotalMult *= 0.8^n` в `GetStatCoefficients` (TotalMult — поверх всех бонусов) |
+| `SprintWarcry` (0.17.0) | сервер: `isSprinting` 1 с → +1 стак `bdDiabloidWarcryCharge` (до 15, сам ничего не даёт). Бег кончился — заряды в 0, `Warcry`: всем своей команды в 30 м `ClearTimedBuffs` + N таймерных стаков `bdDiabloidPerkWarcry` на 10 с (кто под более сильным кличем — не трогаем); КД 10 с в `PerkBodyState.WarcryReadyAt`, в КД бег не заряжает. Статы: `baseDamageAdd += база × 2% × стаки` |
 | `ExplodeOnHit` | `onServerDamageDealt`: `CheckRoll(10 × proc)` → `BlastAttack` 200% `damage` в 20 м, proc 0.2, крит роллится, эффект `OmniExplosionVFXQuick`; флаг `inExplosion` |
-| `SprintMomentum` | сервер: `isSprinting` 1 с → +1 стак `bdDiabloidMomentum` (до 5), не бежит → 0; статы на всех машинах: `sprintSpeedAdd += стаки × уровень%` |
-| `HurtWispSwarm` | `onServerDamageDealt` по жертве-игроку: внутренний КД 2 с на перк, 10% → 10 × `WispMaster` на 10 с + бафф `bdDiabloidSwarmWisp` (хп +900%, урон −80%) |
+| `SprintMomentum` | сервер: `isSprinting` 1 с → +1 стак `bdDiabloidMomentum` (до 5), не бежит → 0; статы на всех машинах: `sprintSpeedAdd += стаки × 5% × 1.03^(уровень − 1)` (0.17.1; было уровень%) |
+| `HurtWispSwarm` | **убран в 0.15.3**: место в enum осталось (сеть), `Perks.IsRetired` → не выпадает (`Perks.Rollable()` в генераторе), эффекта нет |
 | `StandStillSolus` | сервер: "стоит" = сдвиг < 20 см за 0.25 с (позиция клиента приходит рывками — соседние кадры сравнивать нельзя); каст 10 с (стаки `bdDiabloidSolusCast` = секунды) → `RoboBallMiniMaster` без таймера, аспект — случайный из `VanillaEliteTier.BaseTier1`, бафф `bdDiabloidSolusAlly` (атака/бег +100%, урон/хп +200%); всем врагам `Entangle` 5 с; КД 180 с на перк |
 
 Турелям Инженера не достаются `GolemSummon`, `SprintWarcry`, `SprintMomentum`, `HurtWispSwarm`, `StandStillSolus`.
+
+**0.14.0** (`Gameplay/GearPerks.New.cs`, `PerkManager` стал `partial`):
+
+| Перк | Где работает |
+|---|---|
+| `KillDamage` | сервер, `onCharacterDeathGlobal`: убийце (турель → `GearRegistry.OwnerOf`) `GiveItemPermanent(DIABLOID_KILLDAMAGE, число перков × души)`, души: обычный 1, элитка 5 (копия титана — 1), босс/чемпион 50 (0.17.1). Скрытый предмет NoTier (`CannotCopy` — турели не копируют) — счётчик живёт в инвентаре весь забег, синхронизирует игра; статы на всех машинах: `baseDamageAdd += count × 0.01` без проверки перка (навсегда). Панель F2 — строка «Души» |
+| `Infection` | `onServerDamageDealt` по атакующему: `CheckRoll(100 × proc)` → `InfectionDot` на жертве (сервер) + дебафф `bdDiabloidInfection` 20 с (иконка Poisoned). Не стакается: повтор — 20 с заново и новый хозяин. Тик раз в 1 с: 10% текущего `damage` хозяина, proc 0.4, цвет Poison, `OnHitEnemy`/`OnHitAll`; флаг `inInfection` — тики не заражают заново |
+| `SlowAura` | сервер раз в 0.5 с: врагам в 30 м дебафф `bdDiabloidSlowAura` на 1 с (`moveSpeedReductionMultAdd += 1/9` = ровно −10%), сумма `10% × moveSpeed` (уже замедленным — ÷0.9) × число перков → стаки `bdDiabloidStolenSpeed` (1 стак = 0.1 м/с, до 10000); статы на всех машинах `baseMoveSpeedAdd`. Стаки — потому что движение игрока считает клиент |
+| `LootLuck` | `LootDrops`: `luck += PerkManager.LuckBonus(убийца)` (0.5 за перк с 0.17.1, турель — перки хозяина) |
+| `ReflectDamage` | `onServerDamageDealt` по жертве-игроку: `damageDealt × 50% × число перков` каждому врагу в 50 м, proc 0 (на атакующей стороне ранний выход по proc — без цепочек), флаг `inReflect`; лечение убрано в 0.17.1. Урон от себя не отражается |
+| `Banana` (0.18.0) | 0.18.1: всё ниже — только при 3+ шмотках с бананом (`Perks.BananasRequired`, `GearSet.BananaCount/BananaUnlocked`, `CheckBanana` считает бананы в списке перков), меньше — ничего; описание нарочно «+1 Банан. 3 Банана дает преимущество...». `GearSet.CollectPerks` дописывает к списку все `Perks.Rollable()`, кроме банана (`GrantedByBanana`), с броском и уровнем первого банана по слотам; `HasPerk` тоже знает про банан — поэтому всё, что ходит через `PerksOf`/`HasPerk`, работает без правок. Сервер (`GearPerks.Banana.cs`): `FixedUpdate` → `CheckBanana` → раз на забег (`bananaRun`) `KarmaManager.instance`: выключена — `NetworkisKarmaEnabled = true`, затем `ModifyKarma(maxKarma)` (× множитель правил, обрезка до 8). Финальные боссы кроме Митрикса — тела `VoidRaidCrabBody*`, `MiniVoidRaidCrabBody*`, `FalseSonBossBody*`, `SolusHeartBody*` + мастер `ProvidenceFinalMaster` — бафф `bdDiabloidBananaBoss` (`attackSpeedMultAdd += 0.5`), уже живым и через `onBodyStartGlobal`. Найденные имена пишутся в лог при загрузке |
 
 **Перк книги (0.10.0).** `GearSet.BookPerk` + `BookPerkLevel`: `PerkManager.TickBookPerk` на сервере смотрит
 `inventory.currentEquipmentIndex`; книга (другого типа, чем в прошлый раз) → случайный `PerkType` + бросок, уровень =
 `LootRoller.CurrentItemLevel()`; книги нет → `null`. `CollectPerks`/`HasPerk` его учитывают, `GearSyncMessage` пишет
 после 6 слотов `bool | byte тип | float бросок | int уровень`, панель показывает под «Итого». Подобрать ту же книгу
 заново = тот же тип → перк не меняется.
+
+**0.15.0: постоянные перки книг и свиток.** `GearSet.BookPerk` → `List<Perk> BookPerks`. У `Book` есть `Perk`
+(призыв → `GolemSummon`, метеор → `ExplodeOnHit`, скрытность → `SprintMomentum`, перевёртыш → `KillDamage`,
+ножи → `ExtraHit`, камень → `LootLuck`, авантюрист → `XpBonus`), бросок — случайный при подборе; перк дописан в
+описание книги. Свитки (0.15.2: `ScrollRuin` на месте бывшего случайного `Scroll`, дальше `ScrollRetinue`, `ScrollWard`,
+`ScrollFortune`) — снаряжение без действия (`PerformEquipmentAction` → false), у `Book` `IsScroll` и `Perks` из трёх
+типов; `TickBookPerk` просто кладёт `Book.Perks` со случайными бросками. Названия перков для описаний — `Perks.Title`.
+Модель/иконка свитков — Военные облигации
+(War Bonds, `BarrageOnBoss`, с 0.15.1), не нашлась — модель книги. Сеть: после 6 слотов `byte n | (byte тип | float бросок) × n | int уровень`.
 
 Грабля: урон перка внутри `onServerDamageDealt` снова вызывает `onServerDamageDealt`, поэтому `PerksOf` отдаёт
 новый список, а не общий буфер — иначе `foreach` по буферу упал бы от его изменения.
@@ -249,6 +286,29 @@ coefficient 0 (DoT) не лечат вовсе. `MoveSpeed` теперь наз�
 
 У русских префиксов 4 формы (м/ж/ср/мн) и согласование по роду базы, у английских — одна. Имя каждая машина
 собирает сама на своём языке и кеширует отдельно для каждого языка.
+
+### Сияние (0.19.0)
+
+Налог на силу шмота. `QualityInfo.Radiance` (обычная 1, необычная 2, редкая 3, эпик 4, легендарка 5, лунная 0,
+пустотная 4) + книга 1 / свиток 2 → `GearSet.Radiance()`. `Gameplay/Radiance.cs` (`RadianceManager`, компонент на плагине,
+работает на всех машинах): 4 раза в секунду среднее по `PlayerCharacterMasterController.instances` (шмот клиентам
+синхронизирован); изменилось — `MarkAllStatsDirty` всем врагам (команды Monster/Void/Lunar). Статы врагов:
+`health/damage/armor/regenTotalMult *= 1 + R × RadianceEnemyStats%` (по умолчанию 4 с 0.20.1, ключ `RadianceEnemyStatsV2`; было 2). Спавн (сервер):
+рефлексией (0.19.1; хук MMHOOK к приватному вложенному `DirectorMoneyWave` падает в рантайме с MethodAccessException): `multiplier` каждой волны в приватном `CombatDirector.moneyWaves` = исходный × (1 + R × RadianceSpawnRate%), по умолчанию 3; исходный — в ConditionalWeakTable.
+Рост макс. здоровья живого врага игра сама долечивает (как от предмета на здоровье). Панель F2: строка под «Итого»,
+у шмотки — «сияние N» в скобках. Лунные без сияния, зато в проклятиях снова урон (статичный).
+
+### Переработка в опыт (0.20.0)
+
+`Gameplay/GearRecycling.cs` (компонент на плагине). **Сжечь:** клиент в `Update` по `BurnKey` (X, не при открытом UI —
+`LocalUser.isUIFocused`) берёт `InteractionDriver.currentInteractable` своего тела (то, что подсвечено для E); если это
+`GenericPickupController` нашей шмотки или книги — `BurnRequestMessage(masterNetId, pickupNetId)` на сервер (R2API.Networking).
+Сервер: игрок не дальше 15 м → `NetworkServer.Destroy` + `ExperienceManager.AwardExperience` (шарики опыта, как с моба;
+дальше `TeamManager.GiveTeamExperience`, так что перк опыта тоже множит). **Забытое:** `SceneExitController.onBeginExit` —
+все наши пикапы на земле (`FindObjectsOfType<GenericPickupController>`) × `RecycleForgottenShare` (50%) в копилку и удаляются
+(чтобы не посчитать дважды); `Stage.onServerStageBegin` — `GiveTeamExperience` + `SimpleChatMessage` токен `DIABLOID_RECYCLED`.
+Опыт = 0.2 × 20 × (1 + 0.33 × (ур − 1)) — «моб уровня шмотки» — × качество (1/2/4/эпик 6/10, лунная и пустотная 6;
+книга 3, свиток 4) × `RecycleXp`. Уровень: у снятой шмотки (`DroppedGear`) свой, у свежего дропа и книг — текущий.
 
 ## 5. Лут в игре: ключевые решения
 
@@ -328,6 +388,15 @@ IMGUI: некрасиво, зато без ассетов. Каждый кадр
 последний вариант: в бою курсор спрятан, крутить нечем. Размер окна обнуляется на проходе Layout, чтобы
 окно могло и сжиматься; позиция зажимается в пределах экрана. Шрифт — 14 px при 1080p × `PanelScale`.
 
+### Отладочное меню F3 (0.12.0)
+
+`UI/DebugMenu.cs`, тоже IMGUI. Выключено по умолчанию (`Debug/DebugMenu`), клавиша `Debug/DebugKey`. Пока окно открыто,
+`MPEventSystem.cursorOpenerCount++` у локального игрока — курсор виден, а ввод персонажа игра глушит сама (как у ванильных
+окон); при закрытии/выключении счётчик возвращается. Кнопки роняют обычный пикап (`LootCatalog.GetPickupIndex(slot, quality)`
+или `GearBooks.DebugList()`) веером перед игроком через `CreatePickupDroplet` с `ignoreArtifactBasedPickupReplacements` —
+дальше путь как у дропа с моба, статы роллятся при подборе. Пикапы создаёт только сервер → меню работает у хоста,
+у клиента — надпись. Сетевого сообщения клиент→сервер нет сознательно: отладке кооп не нужен.
+
 ## 5б. Книги (0.9.0)
 
 Книга — обычный `EquipmentDef` (`DiabloidBook<Тип>`, `canDrop = true` → в ванильном пуле снаряжения, `canBeRandomlyTriggered = false`).
@@ -348,6 +417,10 @@ IMGUI: некрасиво, зато без ассетов. Каждый кадр
   со счётчиком `Generation`, чтобы старый таймер не сбил новое превращение): не все формы умеют жать снаряжение.
   Форма доживает таймер и на следующем этапе (`master.bodyPrefab` остаётся чужим; нет тела — возвращается только префаб),
   при смерти `bodyPrefab` возвращается сразу, чтобы воскрешение было в своём теле. Вручную обратно — через `EquipmentSlot` чужого тела;
+  с 0.15.3 — ячейка на каждую книгу: ключ `activeEquipmentSlot × 256 + activeEquipmentSet[slot]` (MUL-T, наборы
+  Functional Coupler), раз в 0.25 с и перед применением ячейки, где на месте уже не книга перевёртыша, забываются
+  (`inventory.GetEquipment(slot, set)`); в форме бафф `bdDiabloidShapeshift` (+50% скорости, +200% урона), вешается
+  в `CharacterBody.onBodyStartGlobal` на каждое тело, пока `Transformed` (и на новом этапе);
 - ножи: 50 × `LightningOrb` (`RazorWire`) раз в 0.1 с, 0.2 × damage, proc 0.1, цель мертва — стоп;
 - философский камень: `GiveMoney(Run.GetDifficultyScaledCost(25))`;
 - авантюрист: случайная активная нода `HullMask.Human` в 40–200 м; сфера и `PoiPositionIndicator` — только у хоста (локальные
@@ -399,7 +472,7 @@ IMGUI: некрасиво, зато без ассетов. Каждый кадр
 
 ## 7. Артефакты
 
-Оба — `ArtifactDef` с иконками, нарисованными кодом (`TextureFactory`): игра требует обе картинки
+Все четыре — `ArtifactDef` с иконками, нарисованными кодом (`TextureFactory`): игра требует обе картинки
 (вкл./выкл.), без них экран выбора артефактов падает. Без `unlockableDef` — доступны сразу.
 
 ### Элитаризм
@@ -431,8 +504,26 @@ IMGUI: некрасиво, зато без ассетов. Каждый кадр
   `база + (значение − база) × 0.5`. Метод крутится и на клиентах — артефакт им известен, цифры одинаковые.
   В Симулякре своя формула, там сложность не замедляется.
 
+### Нетерпение (0.13.0, переделан в 0.13.1)
+
+−90% времени зарядки: подписка на ванильное `HoldoutZoneController.calcChargeRate` (`ref float rate`, × 10) у зоны
+телепорта в `onTeleporterBeginChargingGlobal`. Остальное ванильное.
+
+Почему не −100% (0.13.0, сломано в игре): `ChargingState.FixedUpdate` сначала проверяет `charge >= 1 && monstersCleared`,
+а `UpdateMonstersClear` (`monstersCleared = !bossGroup.enabled`) зовёт в конце тика. Залили заряд в тик, когда босс
+только появился, — флаг ещё старый (`true`) → `ChargedState` при живом боссе, телепорт застрял. Мгновенный заряд
+требует ждать хотя бы тик после включения босс-группы — решили не городить.
+
+### Перевёртыш (0.16.0)
+
+`Run.onPlayerFirstCreatedServer` (раз на игрока за забег, поздние игроки тоже) → `inventory.SetEquipmentIndex(книга)`
+(`GearBooks.EquipmentOf(BookType.Shapeshifter)`); слот занят — капля книги на первом `master.onBodyStart`.
+
 ## 8. Грабли
 
+- **R2API: отрицательный `cooldownMultAdd` игнорируется.** RecalculateStats берёт `Math.Max(0, cooldownMultAdd)` (и у
+  `allSkills`, и общий) — минус молча обнуляется. Сокращать перезарядку — `allSkills.cooldownMultiplier *= (1 − x)`
+  (по умолчанию 1) или `cooldownReductionMultAdd`. До 0.16.1 стат «−% к перезарядке» не работал вообще (IL R2API 1.6.6).
 - **Публицированные библиотеки врут.** NuGet-пакет `RiskOfRain2.GameLibs` делает всё public, и компилятор
   пропускает обращения к private, а Mono в рантайме кидает `FieldAccessException`. Так упала 0.1.0
   (`ItemDef.deprecatedTier`, теперь через рефлексию); так чуть не упал титан (`CharacterBody.transform` —
@@ -487,7 +578,7 @@ IMGUI: некрасиво, зато без ассетов. Каждый кадр
 
 ### Как быстро проверить
 
-1. `NormalDropChance = 100` — сыплется с каждого моба.
+1. `NormalDropChance = 100` — сыплется с каждого моба. Или F3 (`Debug/DebugMenu = true`) — нужное качество и слот сразу.
 2. Подобрать шмотку по E, открыть F2; взять вторую того же слота — старая падает; взять старую обратно — статы те же.
 3. Включить артефакт снаряжения, открыть пару сундуков, зайти в магазин.
 4. В `BepInEx\LogOutput.log` искать `Diabloid`: строки про 42 типа шмоток, хук сложности и предупреждения.
@@ -499,8 +590,9 @@ IMGUI: некрасиво, зато без ассетов. Каждый кадр
 - Лут общий: кто первый нажал E, того и шмотка.
 - Адаптивный сундук с артефактом снаряжения крутит обычные предметы, а выдаёт шмотку.
 - Три колонки панели — ~1300–1500 px в ширину, на узких экранах не влезут.
-- Модельки одолжены у ванильных предметов (Crowbar, Happiest Mask, Repulsion Armor Plate, Kjaro's Band,
-  Red Whip, Paul's Goat Hoof), меняются в конфиге.
+- Модельки одолжены у ванильных предметов (Tri-Tip Dagger `BleedOnHit`, Happiest Mask, Repulsion Armor Plate,
+  Kjaro's Band, Red Whip, Hiker's Boots `CritAtLowerElevation`), меняются в конфиге (`Visuals/{слот}Model`; новые дефолты
+  0.15.1 видны только со свежим .cfg). Предмета нет (DLC не установлен) — запасная из базовой игры (Crowbar, Hoof…).
 - "Сила предмета" — грубая сумма аффиксов в долях от базы.
 
 ## 11. Баланс элиток: что просится в правку

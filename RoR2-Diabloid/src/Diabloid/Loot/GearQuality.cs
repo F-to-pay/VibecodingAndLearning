@@ -52,6 +52,12 @@ namespace Diabloid.Loot
         public readonly int PerkCount;
 
         /// <summary>
+        /// Сияние (0.19.0): сколько уровней сияния даёт надетая шмотка этого качества. От уровня не зависит.
+        /// Каждый уровень (в среднем по игрокам) усиливает врагов — см. Gameplay/Radiance.cs. Лунные — 0.
+        /// </summary>
+        public readonly int Radiance;
+
+        /// <summary>
         /// Проклятие, которое есть всегда (первым), остальные — случайные из Stats.CursePool.
         /// Пустотные: всегда минус % регенерации.
         /// </summary>
@@ -69,7 +75,8 @@ namespace Diabloid.Loot
         public QualityInfo(GearQuality quality, string nameEn, string[] formsRu, string colorHex,
                            float statMultiplier, float rollMin, int affixCount, float defaultWeight,
                            bool randomlyRolled = true, int curseCount = 0, float curseMultiplier = 0f,
-                           bool scalesWithMonsterLevel = false, StatType? forcedCurse = null, int perkCount = 0)
+                           bool scalesWithMonsterLevel = false, StatType? forcedCurse = null, int perkCount = 0,
+                           int radiance = 0)
         {
             if (formsRu == null || formsRu.Length != 4)
                 throw new ArgumentException("Need exactly 4 Russian adjective forms", nameof(formsRu));
@@ -88,6 +95,7 @@ namespace Diabloid.Loot
             ScalesWithMonsterLevel = scalesWithMonsterLevel;
             ForcedCurse = forcedCurse;
             PerkCount = perkCount;
+            Radiance = radiance;
         }
 
         /// <summary>Прилагательное качества: "Legendary" или "легендарная" (по роду русского слова).</summary>
@@ -107,25 +115,28 @@ namespace Diabloid.Loot
         private static readonly QualityInfo[] all =
         {
             //               качество                 англ.        русские формы (м, ж, ср, мн)                                            цвет      xСтаты  мин.бросок  аффиксы  вес
-            new QualityInfo(GearQuality.Common,     "Common",    new[] { "обычный", "обычная", "обычное", "обычные" },                 "FFFFFF", 1.0f,   0.5f,       1,       60f),
-            new QualityInfo(GearQuality.Uncommon,   "Uncommon",  new[] { "необычный", "необычная", "необычное", "необычные" },         "77FF17", 1.3f,   0.6f,       2,       25f),
-            new QualityInfo(GearQuality.Rare,       "Rare",      new[] { "редкий", "редкая", "редкое", "редкие" },                     "E7543A", 1.7f,   0.7f,       3,       10f,
-                            perkCount: 1),
+            new QualityInfo(GearQuality.Common,     "Common",    new[] { "обычный", "обычная", "обычное", "обычные" },                 "FFFFFF", 1.0f,   0.5f,       1,       60f, radiance: 1),
+            // 0.17.0: разрыв качеств сжат (было 1 / 1.3 / 1.7 / 3.0). Строка легендарки теперь ~1.3 строки редкой,
+            // ~1.9 обычной — её догоняют уровнем за пару этапов. Сила легендарки — в числе строк и перках.
+            new QualityInfo(GearQuality.Uncommon,   "Uncommon",  new[] { "необычный", "необычная", "необычное", "необычные" },         "77FF17", 1.15f,  0.6f,       2,       25f, radiance: 2),
+            new QualityInfo(GearQuality.Rare,       "Rare",      new[] { "редкий", "редкая", "редкое", "редкие" },                     "E7543A", 1.3f,   0.7f,       3,       10f,
+                            perkCount: 1, radiance: 3),
             // Эпик вырезан (0.5.0): не выпадает ни из рандома, ни из артефакта. Строка осталась ради порядка enum.
-            new QualityInfo(GearQuality.Epic,       "Epic",      new[] { "эпический", "эпическая", "эпическое", "эпические" },         "C679FF", 2.2f,   0.8f,       4,       0f,
-                            randomlyRolled: false),
-            new QualityInfo(GearQuality.Legendary,  "Legendary", new[] { "легендарный", "легендарная", "легендарное", "легендарные" }, "FFB300", 3.0f,   0.9f,       5,       1f,
-                            perkCount: 2),
+            new QualityInfo(GearQuality.Epic,       "Epic",      new[] { "эпический", "эпическая", "эпическое", "эпические" },         "C679FF", 1.4f,   0.8f,       4,       0f,
+                            randomlyRolled: false, radiance: 4),
+            new QualityInfo(GearQuality.Legendary,  "Legendary", new[] { "легендарный", "легендарная", "легендарное", "легендарные" }, "FFB300", 1.5f,   0.9f,       5,       1f,
+                            perkCount: 2, radiance: 5),
 
-            // Лунное: 3 очень жирных аффикса (x4) + 2 проклятия (x6 в минус). Сделка с луной, как у ванильных лунных предметов.
-            new QualityInfo(GearQuality.Lunar,      "Lunar",     new[] { "лунный", "лунная", "лунное", "лунные" },                     "307FFF", 4.0f,   0.9f,       3,       0f,
-                            randomlyRolled: false, curseCount: 2, curseMultiplier: 6.0f, perkCount: 1),
+            // Лунное: 3 очень жирных аффикса + 2 проклятия. Сделка с луной, как у ванильных лунных предметов.
+            // 0.17.0: вместе с легендаркой урезано вдвое — и бонусы (4 → 2), и проклятия (x6 → x3), пропорция та же.
+            new QualityInfo(GearQuality.Lunar,      "Lunar",     new[] { "лунный", "лунная", "лунное", "лунные" },                     "307FFF", 2.0f,   0.9f,       3,       0f,
+                            randomlyRolled: false, curseCount: 2, curseMultiplier: 3.0f, perkCount: 1, radiance: 0),
 
-            // Пустотное: сила x2.2, уровень всегда = текущему уровню монстров, чем дольше забег — тем жирнее.
+            // Пустотное: сила как у (вырезанного) эпика, x1.4 (0.17.0, было 2.2), уровень всегда = текущему уровню монстров, чем дольше забег — тем жирнее.
             // Плата: всегда режет регенерацию (-20..25% за шмотку, от уровня не растёт).
-            new QualityInfo(GearQuality.Void,       "Void",      new[] { "пустотный", "пустотная", "пустотное", "пустотные" },         "ED7FCD", 2.2f,   0.8f,       4,       0f,
+            new QualityInfo(GearQuality.Void,       "Void",      new[] { "пустотный", "пустотная", "пустотное", "пустотные" },         "ED7FCD", 1.4f,   0.8f,       4,       0f,
                             randomlyRolled: false, curseCount: 1, curseMultiplier: 2.5f,
-                            scalesWithMonsterLevel: true, forcedCurse: StatType.RegenPercent, perkCount: 1),
+                            scalesWithMonsterLevel: true, forcedCurse: StatType.RegenPercent, perkCount: 1, radiance: 4),
         };
 
         public static int Count => all.Length;

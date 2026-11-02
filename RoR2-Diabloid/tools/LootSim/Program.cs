@@ -270,7 +270,8 @@ namespace Diabloid.LootSim
                 }
             }
 
-            // 2б'. Проклятия лунных — вдвое злее, чем в 0.4.0 (там x3 от старых баз), бонусы ХП ÷3, реген ×2.
+            // 2б'. Проклятия лунных: x6 в 0.8.4, с 0.17.0 снова x3 от старых баз (вместе с бонусами урезаны вдвое).
+            //      Бонусы ХП и щита ÷3, реген ×2, проценты растут геометрически.
             {
                 var flat = new LootSettings { DuplicateStatChance = 0f, LevelScalingMultiplier = 0f };
                 double curseSum = 0; int curseN = 0;
@@ -281,11 +282,27 @@ namespace Diabloid.LootSim
                         curseN++;
                     }
                 double ratio = curseSum / curseN / 0.95; // средний бросок лунных 0.95
-                Check(Math.Abs(ratio - 2.0) < 0.1, $"лунные проклятия злее старых в {ratio:0.00} раза, ждали ~2");
+                Check(Math.Abs(ratio - 1.0) < 0.05, $"лунные проклятия злее старых в {ratio:0.00} раза, ждали ~1");
+                Check(Math.Abs(Stats.Get(StatType.Shield).BaseValue * 3f - 20f) < 0.01f, "база щита не 20/3");
+                Check(Math.Abs(LootGenerator.LevelScale(StatType.HealOnHit, 21, 1f) - 1.6f) < 0.001f, "лечение за попадание: рост не 0.03 линейно");
+                Check(Math.Abs(LootGenerator.LevelScale(StatType.Damage, 21, 1f) - (float)Math.Pow(1.03, 20)) < 0.001f, "урон: рост не геометрический 1.03");
+                Check(Math.Abs(LootGenerator.LevelScale(StatType.MaxHealth, 21, 1f) - 7f) < 0.001f, "плоское ХП: рост не 0.3 линейно");
+                Check(LootGenerator.LevelScale(StatType.Damage, 21, 0f) == 1f, "геометрический рост при множителе 0 не 1");
                 Check(Math.Abs(Stats.Get(StatType.MaxHealth).BaseValue * 3f - 25f) < 0.01f, "база плоского ХП не 25/3");
                 Check(Math.Abs(Stats.Get(StatType.MaxHealthPercent).BaseValue * 3f - 5f) < 0.01f, "база %ХП не 5/3");
                 Check(Math.Abs(Stats.Get(StatType.Regen).BaseValue * 3f - 1.6f) < 0.001f, "база регена не 1.6/3");
-                Check(Array.IndexOf(Stats.CursePool, StatType.Damage) < 0, "урон снова в проклятиях");
+                Check(Array.IndexOf(Stats.CursePool, StatType.Damage) >= 0, "урона нет в проклятиях (вернули в 0.19.0)");
+
+                // 0.19.0: проклятие урона не растёт с уровнем — на 60-м уровне такое же, как на 1-м (−16.2…−18%).
+                int damageCurses = 0;
+                for (int i = 0; i < 6000; i++)
+                    foreach (var c in LootGenerator.Generate((GearSlot)(i % Slots.Count), GearQuality.Lunar, 60, rng, settings).Affixes)
+                        if (c.IsCurse && c.Stat == StatType.Damage)
+                        {
+                            damageCurses++;
+                            Check(c.Value <= -16.2f && c.Value >= -18f, $"проклятие урона на 60-м уровне {c.Value}, ждали −16.2…−18");
+                        }
+                Check(damageCurses > 100, $"проклятие урона почти не выпадает ({damageCurses})");
             }
 
             // 2б''. Перки: крайние значения диапазонов и обратная/прямая связь.
@@ -388,6 +405,52 @@ namespace Diabloid.LootSim
                         string ground = GearItem.GroundName((GearSlot)s, (GearQuality)q, lang);
                         Check(!string.IsNullOrWhiteSpace(ground) && char.IsUpper(ground[0]), $"кривое название на земле [{lang}] '{ground}'");
                     }
+
+            // 4б. Банан (0.18.0): включает все остальные выпадающие перки, один набор на любое число бананов.
+            //     0.18.1: только от трёх бананов, меньше — ничего.
+            {
+                var r = LootGenerator.Generate(GearSlot.Boots, GearQuality.Rare, 7, rng, settings);
+                var withBanana = new GearItem(r.Slot, r.Quality, r.Level, 0, r.Implicit, r.Affixes.ToList(),
+                                              new List<Perk> { new Perk(PerkType.Banana, 0.25f) });
+                var r2 = LootGenerator.Generate(GearSlot.Helmet, GearQuality.Rare, 7, rng, settings);
+                var secondBanana = new GearItem(r2.Slot, r2.Quality, r2.Level, 0, r2.Implicit, r2.Affixes.ToList(),
+                                                new List<Perk> { new Perk(PerkType.Banana, 0.9f) });
+                var r3 = LootGenerator.Generate(GearSlot.Weapon, GearQuality.Rare, 7, rng, settings);
+                var thirdBanana = new GearItem(r3.Slot, r3.Quality, r3.Level, 0, r3.Implicit, r3.Affixes.ToList(),
+                                               new List<Perk> { new Perk(PerkType.Banana, 0.5f) });
+                var set = new GearSet();
+                set.Equip(withBanana);
+                set.Equip(secondBanana);
+                var two = new List<(Perk perk, int level)>();
+                set.CollectPerks(two);
+                Check(two.All(p => p.perk.Type == PerkType.Banana) && two.Count == 2, "банан: два банана уже что-то дают");
+                Check(!set.HasPerk(PerkType.Berserk) && !set.BananaUnlocked, "банан: HasPerk при двух бананах");
+                set.Equip(thirdBanana);
+                var perks = new List<(Perk perk, int level)>();
+                set.CollectPerks(perks);
+                Check(set.BananaCount() == 3 && set.BananaUnlocked, "банан: не насчитал три");
+                int granted = Perks.Rollable().Count(t => t != PerkType.Banana);
+                Check(perks.Count(p => p.perk.Type != PerkType.Banana) == granted, $"банан: включил {perks.Count(p => p.perk.Type != PerkType.Banana)} перков, ждали {granted}");
+                Check(perks.All(p => !Perks.IsRetired(p.perk.Type)), "банан включил убранный перк");
+                Check(perks.Where(p => p.perk.Type != PerkType.Banana).All(p => p.perk.Roll == 0.5f && p.level == 7), "банан: не тот бросок/уровень (первый по слотам — оружие)");
+                Check(set.HasPerk(PerkType.Berserk) && !set.HasPerk(PerkType.ArmorOnHurt), "банан: HasPerk врёт");
+                Check(Array.IndexOf(Perks.Rollable(), PerkType.Banana) >= 0, "банан не выпадает");
+            }
+
+            // 4в. Сияние (0.19.0): по качеству, от уровня не зависит; лунные — 0; книга 1, свиток 2.
+            {
+                var set = new GearSet();
+                set.Equip(LootGenerator.Generate(GearSlot.Weapon, GearQuality.Legendary, 1, rng, settings));
+                set.Equip(LootGenerator.Generate(GearSlot.Helmet, GearQuality.Rare, 40, rng, settings));
+                set.Equip(LootGenerator.Generate(GearSlot.Armor, GearQuality.Lunar, 40, rng, settings));
+                set.Equip(LootGenerator.Generate(GearSlot.Boots, GearQuality.Common, 40, rng, settings));
+                Check(set.Radiance() == 5 + 3 + 0 + 1, $"сияние {set.Radiance()}, ждали 9");
+                set.BookPerks.Add(new Perk(PerkType.XpBonus, 0f));
+                Check(set.Radiance() == 10, "книга не дала 1 сияния");
+                set.BookPerks.Add(new Perk(PerkType.LootLuck, 0f));
+                Check(set.Radiance() == 11, "свиток не дал 2 сияния");
+                Check(Qualities.Get(GearQuality.Lunar).Radiance == 0, "у лунных есть сияние");
+            }
 
             // 5. GearSet: один слот — одна шмотка, замена возвращает старую.
             {

@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Верстак без игры: самотест чистых частей мода и рендер иконок предметов в PNG.
+    Подключает ТЕ ЖЕ файлы из src/Destroyer/Core и src/Destroyer/Art, что и мод, но без Unity и RoR2.
+    Как запускать — в начале Program.cs.
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\..\src\Destroyer\Core\**\*.cs" Link="Core\%(RecursiveDir)%(Filename)%(Extension)" />
+    <Compile Include="..\..\src\Destroyer\Art\**\*.cs" Link="Art\%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+
+</Project>

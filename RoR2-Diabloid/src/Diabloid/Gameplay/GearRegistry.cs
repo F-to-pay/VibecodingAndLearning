@@ -52,7 +52,7 @@ namespace Diabloid.Gameplay
             return System.Array.IndexOf(inheritingMasters, master.masterIndex) >= 0;
         }
 
-        private static CharacterMaster OwnerOf(CharacterMaster master)
+        public static CharacterMaster OwnerOf(CharacterMaster master)
         {
             var ownership = master ? master.minionOwnership : null;
             return ownership ? ownership.ownerMaster : null;

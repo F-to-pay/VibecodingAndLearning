@@ -46,7 +46,8 @@ namespace Diabloid.Gameplay
                 rng,
                 settings.QualityWeights,
                 champion ? GearQuality.Rare : GearQuality.Common,
-                champion ? DiabloidConfig.ChampionLuck.Value : elite ? DiabloidConfig.EliteLuck.Value : 0f);
+                (champion ? DiabloidConfig.ChampionLuck.Value : elite ? DiabloidConfig.EliteLuck.Value : 0f)
+                + PerkManager.LuckBonus(report.attackerMaster)); // перк удачи убийцы (0.14.0)
 
             // Лунные и пустотные мобы иногда роняют шмотку своего особого качества.
             if (IsLunar(report))

@@ -127,7 +127,7 @@ namespace Diabloid.Loot
             var perks = new List<Perk>(quality.PerkCount);
             if (quality.PerkCount <= 0) return perks;
 
-            var types = (PerkType[])Enum.GetValues(typeof(PerkType));
+            var types = Perks.Rollable();
             Shuffle(types, rng);
             for (int i = 0; i < quality.PerkCount && i < types.Length; i++)
                 perks.Add(new Perk(types[i], (float)rng.NextDouble()));
@@ -185,7 +185,8 @@ namespace Diabloid.Loot
                 var info = Stats.Get(stat);
                 // Roll умножает на BaseValue — подменяем на базу проклятия доп.множителем.
                 float curseBase = info.CurseBaseValue / info.BaseValue;
-                float magnitude = Roll(stat, quality.CurseMultiplier, quality.RollMin, level, rng, settings, curseBase, round);
+                int curseLevel = info.StaticCurse ? 1 : level; // урон — без роста от уровня (0.19.0)
+                float magnitude = Roll(stat, quality.CurseMultiplier, quality.RollMin, curseLevel, rng, settings, curseBase, round);
                 affixes.Add(new Affix(stat, -magnitude));
             }
         }
@@ -210,10 +211,16 @@ namespace Diabloid.Loot
             return round ? RoundStat(stat, value) : value;
         }
 
-        /// <summary>Рост стата от уровня: 1 + рост_за_уровень × множитель × (уровень − 1).</summary>
+        /// <summary>
+        /// Рост стата от уровня. Линейный: 1 + рост × множитель × (уровень − 1).
+        /// Геометрический (проценты, 0.17.0): (1 + рост × множитель)^(уровень − 1).
+        /// </summary>
         public static float LevelScale(StatType stat, int level, float levelScalingMultiplier)
         {
-            return 1f + Stats.Get(stat).LevelScaling * levelScalingMultiplier * (Math.Max(1, level) - 1);
+            var info = Stats.Get(stat);
+            int steps = Math.Max(1, level) - 1;
+            float rate = info.LevelScaling * levelScalingMultiplier;
+            return info.Geometric ? (float)Math.Pow(1.0 + rate, steps) : 1f + rate * steps;
         }
 
         /// <summary>

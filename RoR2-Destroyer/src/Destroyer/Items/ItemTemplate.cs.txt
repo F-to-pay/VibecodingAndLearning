@@ -1,0 +1,133 @@
+// ШАБЛОН ПРЕДМЕТА. Не компилируется (расширение .txt).
+// Как пользоваться:
+//   1. Скопируй в Items/ИмяПредмета.cs, переименуй класс и Id.
+//   2. Впиши `new ИмяПредмета(),` в Items/ItemList.cs.
+//   3. Выкинь лишние части: здесь показаны все три типовых способа сделать эффект.
+//   4. Иконка: метод в Art/IconBook (или Art/Icons/ИмяПредмета.cs как partial class IconBook) + строчка в IconBook.All.
+//      Проверить без игры: build.cmd → logs\icons\_sheet.png.
+//
+// Этот файл компилируется в облачной проверке каркаса, так что API в нём живое (RoR2 1.5.0, R2API 2026-10).
+
+using Destroyer.Content;
+using Destroyer.Core;
+using BepInEx.Configuration;
+using R2API;
+using RoR2;
+using UnityEngine;
+using UnityEngine.Networking;
+
+namespace Destroyer.Items
+{
+    internal sealed class ItemTemplate : ItemBase
+    {
+        // ---------- Кто я ----------
+
+        public override string Id => "TEMPLATE";                 // → ItemDef.name "DESTROYER_TEMPLATE". После релиза не менять.
+        public override ItemTier Tier => ItemTier.Tier1;          // белый
+        public override string ModelFrom => "Crowbar";            // моделька на земле — ломик
+        public override ItemTag[] Tags => new[] { ItemTag.Damage };
+
+        public override Words Name => new Words("Template", "Шаблон");
+
+        public override Words Pickup => new Words(
+            "Deal more damage. Hits sometimes deal a bonus strike.",
+            "Больше урона. Удары иногда бьют ещё раз.");
+
+        // Описание собирается из ТЕКУЩИХ настроек — меняешь число в Risk of Options, меняется и текст.
+        public override Words Description => new Words(
+            $"Increase damage by {Tx.Damage("+" + Tx.Pct(damage.Value))} {Tx.Stack("+" + Tx.Pct(damage.Value) + " per stack")}. " +
+            $"{Tx.Damage(Tx.Pct(procChance.Value))} chance on hit to deal {Tx.Damage(Tx.Pct(bonusDamage.Value) + " TOTAL damage")} again.",
+            $"Увеличивает урон на {Tx.Damage("+" + Tx.Pct(damage.Value))} {Tx.Stack("+" + Tx.Pct(damage.Value) + " за копию")}. " +
+            $"{Tx.Damage(Tx.Pct(procChance.Value))} шанс при попадании ещё раз нанести {Tx.Damage(Tx.Pct(bonusDamage.Value) + " ОБЩЕГО урона")}.");
+
+        public override Words Lore => new Words("It was a template once.", "Когда-то это был шаблон.");
+
+        // ---------- Настройки ----------
+
+        private ConfigEntry<float> damage;
+        private ConfigEntry<float> procChance;
+        private ConfigEntry<float> bonusDamage;
+
+        protected override void BindConfig(ItemSettings s)
+        {
+            damage = s.Float("Damage", 0.10f, 0f, 1f,
+                new Words("Damage per stack", "Урон за копию"),
+                new Words("Damage bonus per stack (0.1 = +10%).", "Прибавка к урону за копию (0.1 = +10%)."),
+                "{0:P0}");
+            procChance = s.Float("ProcChance", 0.10f, 0f, 1f,
+                new Words("Bonus strike chance", "Шанс доп. удара"),
+                new Words("Chance on hit (0.1 = 10%), scaled by the attack's proc coefficient.",
+                          "Шанс при попадании (0.1 = 10%), умножается на коэффициент срабатывания атаки."),
+                "{0:P0}");
+            bonusDamage = s.Float("BonusDamage", 0.5f, 0f, 5f,
+                new Words("Bonus strike damage", "Урон доп. удара"),
+                new Words("Bonus strike damage, fraction of the hit's damage per stack.",
+                          "Урон доп. удара — доля урона попадания за копию."),
+                "{0:P0}");
+        }
+
+        // ---------- Эффекты ----------
+
+        protected override void Hook()
+        {
+            // 1) СТАТЫ. Считается на каждой машине при пересчёте статов (подобрал предмет, баф, уровень...).
+            //    Поля args: damageMultAdd, attackSpeedMultAdd, moveSpeedMultAdd, healthMultAdd, armorAdd,
+            //    critAdd, baseRegenAdd, jumpPowerMultAdd, ... Сокращать перезарядку — через args.allSkills
+            //    (отрицательный cooldownMultAdd R2API обнуляет — грабли из Diabloid).
+            RecalculateStatsAPI.GetStatCoefficients += (body, args) =>
+            {
+                int n = Count(body);
+                if (n > 0) args.damageMultAdd += Stacking.Linear(n, damage.Value);
+            };
+
+            // 2) ПРИ ПОПАДАНИИ. Только сервер, как у ванильных on-hit предметов (см. Content/HitEvents.cs):
+            //    proc coefficient > 0, урон не отклонён, есть тело атакующего и жертвы.
+            HitEvents.OnHit += OnHit;
+
+            // 3) ПОВЕДЕНИЕ НА ТЕЛЕ. Компонент живёт, пока у тела есть предмет; stack = число копий.
+            UseBehavior<TemplateBehavior>();
+        }
+
+        private bool inBonusStrike; // доп. удар не должен порождать доп. удар
+
+        private void OnHit(DamageInfo info, CharacterBody attacker, CharacterBody victim)
+        {
+            if (inBonusStrike) return;
+            int n = Count(attacker);
+            if (n <= 0 || !victim.healthComponent || !victim.healthComponent.alive) return;
+
+            // Шанс в долях × proc coefficient атаки, с удачей хозяина.
+            if (!Roll(procChance.Value, info.procCoefficient, attacker.master)) return;
+
+            var strike = new DamageInfo
+            {
+                attacker = attacker.gameObject,
+                inflictor = attacker.gameObject,
+                damage = info.damage * bonusDamage.Value * n, // info.damage — "TOTAL damage" попадания
+                crit = info.crit,
+                position = info.position,
+                procCoefficient = 0f,               // сам ничего не прокает — без цепных реакций
+                procChainMask = info.procChainMask,
+                damageColorIndex = DamageColorIndex.Item,
+                damageType = DamageType.Generic,
+            };
+            inBonusStrike = true;
+            try { victim.healthComponent.TakeDamage(strike); }
+            finally { inBonusStrike = false; }
+        }
+
+        /// <summary>Пример поведения: раз в 5 секунд пишет в лог, сколько копий у тела. Только сервер.</summary>
+        private sealed class TemplateBehavior : CharacterBody.ItemBehavior
+        {
+            private float timer;
+
+            private void FixedUpdate()
+            {
+                timer -= Time.fixedDeltaTime;
+                if (timer > 0f) return;
+                timer = 5f;
+                DestroyerPlugin.Log.LogDebug($"Template: {body.GetDisplayName()} has {stack}");
+            }
+        }
+    }
+}

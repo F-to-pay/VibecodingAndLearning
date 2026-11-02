@@ -28,6 +28,13 @@ namespace Diabloid.Books
         KnifeStorm,      // 50 ножей за 5 с по цели, 20% урона каждый, proc 0.1, КД 80 с
         PhilosopherStone,// 25 золота со скейлом сложности, КД 30 с
         Adventurer,      // метка в 40–200 м, дошёл — предмет как из малого сундука, КД 60 с
+        // --- 0.15.0 ---
+        // Свитки: на Q ничего, пока в слоте — 3 своих перка. (0.15.0 был один свиток со случайными — это его место.)
+        ScrollRuin,      // взрыв, добивка, заражение
+        // --- 0.15.2 ---
+        ScrollRetinue,   // мини-голем, огоньки, Солус
+        ScrollWard,      // регенерация, броня от здоровья, отражение (0.17.1: броня от урона убрана)
+        ScrollFortune,   // удача, души, опыт
     }
 
     internal static class GearBooks
@@ -52,6 +59,9 @@ namespace Diabloid.Books
             public Words Description;
             public float Cooldown;
             public EquipmentDef Def;
+            /// <summary>Перки, которые даёт снаряжение, пока лежит в слоте (книга — 1, свиток — 3). Броски — при подборе.</summary>
+            public PerkType[] Perks = new PerkType[0];
+            public bool IsScroll;
         }
 
         private static readonly Book[] books =
@@ -64,6 +74,7 @@ namespace Diabloid.Books
                     $"Summon a random allied boss for {SummonLifetime}s: half size, {SummonDamageShare * 100}% of your damage, {SummonHealthShare * 100}% of your max health.",
                     $"Призывает случайного союзного босса на {SummonLifetime} с: вдвое меньше, {SummonDamageShare * 100}% твоего урона, {SummonHealthShare * 100}% твоего здоровья."),
                 Cooldown = SummonCooldown,
+                Perks = new[] { PerkType.GolemSummon },
             },
             new Book
             {
@@ -73,6 +84,7 @@ namespace Diabloid.Books
                     $"A meteor falls where you aim after {BookEffects.MeteorDelay}s: {BookEffects.MeteorDamage * 100}% damage within {BookEffects.MeteorRadius}m and knockback.",
                     $"Через {BookEffects.MeteorDelay} с в точку прицела падает метеор: {BookEffects.MeteorDamage * 100}% урона в {BookEffects.MeteorRadius} м и отталкивание."),
                 Cooldown = BookEffects.MeteorCooldown,
+                Perks = new[] { PerkType.ExplodeOnHit },
             },
             new Book
             {
@@ -82,15 +94,17 @@ namespace Diabloid.Books
                     $"Become invisible and gain +{BookEffects.StealthSpeed * 100}% movement speed for {BookEffects.StealthDuration}s.",
                     $"Невидимость и +{BookEffects.StealthSpeed * 100}% к скорости на {BookEffects.StealthDuration} с."),
                 Cooldown = BookEffects.StealthCooldown,
+                Perks = new[] { PerkType.SprintMomentum },
             },
             new Book
             {
                 Type = BookType.Shapeshifter,
                 Name = new Words("Tome of the Shapeshifter", "Книга перевёртыша"),
                 Description = new Words(
-                    $"First use: erase the aimed enemy (not a teleporter boss) and take its form for the rest of the run. Then: turn into that form for {BookEffects.ShapeDuration}s (use again to return early).",
-                    $"Первое применение: стирает цель под прицелом (не босса телепорта) и забирает её форму до конца забега. Дальше: превращает в эту форму на {BookEffects.ShapeDuration} с (повторно — вернуться раньше)."),
+                    $"First use: erase the aimed enemy (not a teleporter boss) and store its form in this book. Then: turn into that form for {BookEffects.ShapeDuration}s with +{BookEffects.ShapeMoveSpeed * 100}% speed and +{BookEffects.ShapeDamage * 100}% damage (use again to return early).",
+                    $"Первое применение: стирает цель под прицелом (не босса телепорта) и запоминает её форму в этой книге. Дальше: превращает в эту форму на {BookEffects.ShapeDuration} с, +{BookEffects.ShapeMoveSpeed * 100}% скорости и +{BookEffects.ShapeDamage * 100}% урона (повторно — вернуться раньше)."),
                 Cooldown = BookEffects.ShapeCooldown,
+                Perks = new[] { PerkType.KillDamage },
             },
             new Book
             {
@@ -100,6 +114,7 @@ namespace Diabloid.Books
                     $"{BookEffects.KnivesCount} knives hit the aimed enemy over {BookEffects.KnivesDuration}s, {BookEffects.KnivesDamage * 100}% damage each.",
                     $"{BookEffects.KnivesCount} ножей за {BookEffects.KnivesDuration} с по цели под прицелом, {BookEffects.KnivesDamage * 100}% урона каждый."),
                 Cooldown = BookEffects.KnivesCooldown,
+                Perks = new[] { PerkType.ExtraHit },
             },
             new Book
             {
@@ -109,6 +124,7 @@ namespace Diabloid.Books
                     $"Gain {BookEffects.StoneGold} gold (scales over time like chest prices).",
                     $"Даёт {BookEffects.StoneGold} золота (растёт со временем, как цены сундуков)."),
                 Cooldown = BookEffects.StoneCooldown,
+                Perks = new[] { PerkType.LootLuck },
             },
             new Book
             {
@@ -118,8 +134,61 @@ namespace Diabloid.Books
                     $"Marks a random spot on the map. Reach it to get an item (like a small chest).",
                     $"Отмечает случайную точку на карте. Дойди до неё — получишь предмет (как из малого сундука)."),
                 Cooldown = BookEffects.AdventureCooldown,
+                Perks = new[] { PerkType.XpBonus },
+            },
+            new Book
+            {
+                Type = BookType.ScrollRuin,
+                Name = new Words("Scroll of Ruin", "Свиток разрушения"),
+                IsScroll = true,
+                Perks = new[] { PerkType.ExplodeOnHit, PerkType.ExtraHit, PerkType.Infection },
+            },
+            new Book
+            {
+                Type = BookType.ScrollRetinue,
+                Name = new Words("Scroll of the Retinue", "Свиток свиты"),
+                IsScroll = true,
+                Perks = new[] { PerkType.GolemSummon, PerkType.WispOnKill, PerkType.StandStillSolus },
+            },
+            new Book
+            {
+                Type = BookType.ScrollWard,
+                Name = new Words("Scroll of Warding", "Свиток защиты"),
+                IsScroll = true,
+                Perks = new[] { PerkType.MissingHpRegen, PerkType.HealthArmor, PerkType.ReflectDamage },
+            },
+            new Book
+            {
+                Type = BookType.ScrollFortune,
+                Name = new Words("Scroll of Fortune", "Свиток фортуны"),
+                IsScroll = true,
+                Perks = new[] { PerkType.LootLuck, PerkType.KillDamage, PerkType.XpBonus },
             },
         };
+
+        /// <summary>Снаряжение книги данного типа (None, если ещё не зарегистрирована).</summary>
+        public static EquipmentIndex EquipmentOf(BookType type)
+        {
+            foreach (var book in books)
+                if (book.Type == type && book.Def) return book.Def.equipmentIndex;
+            return EquipmentIndex.None;
+        }
+
+        /// <summary>Книга (или свиток) по снаряжению: тип и её постоянный перк.</summary>
+        public static bool TryGetBook(EquipmentIndex index, out BookType type, out PerkType[] perks)
+        {
+            type = default;
+            perks = null;
+            if (index == EquipmentIndex.None) return false;
+            foreach (var book in books)
+            {
+                if (!book.Def || book.Def.equipmentIndex != index) continue;
+                type = book.Type;
+                perks = book.Perks;
+                return true;
+            }
+            return false;
+        }
 
         /// <summary>Метка призванного книгой босса: по ней все машины считают статы и уменьшают модель.</summary>
         public static BuffDef SummonedBossBuff { get; private set; }
@@ -150,9 +219,20 @@ namespace Diabloid.Books
                 def.isBoss = false;
                 def.colorIndex = ColorCatalog.ColorIndex.Equipment;
 
+                // Перки снаряжения — в описание (0.15.0). Свиток: на Q ничего, описание — только перки.
+                string perksEn = string.Join(", ", Array.ConvertAll(book.Perks, p => $"\"{Perks.Title(p).En}\""));
+                string perksRu = string.Join(", ", Array.ConvertAll(book.Perks, p => $"«{Perks.Title(p).Ru}»"));
+                var description = book.IsScroll
+                    ? new Words($"Does nothing when used. While equipped: perks {perksEn}.",
+                                $"На Q ничего не делает. Пока в слоте: перки {perksRu}.")
+                    : book.Perks.Length > 0
+                        ? new Words($"{book.Description.En} While equipped: perk {perksEn}.",
+                                    $"{book.Description.Ru} Пока в слоте: перк {perksRu}.")
+                        : book.Description;
+
                 GameLanguage.AddToken(def.nameToken, book.Name);
-                GameLanguage.AddToken(def.pickupToken, book.Description);
-                GameLanguage.AddToken(def.descriptionToken, book.Description);
+                GameLanguage.AddToken(def.pickupToken, description);
+                GameLanguage.AddToken(def.descriptionToken, description);
 
                 book.Def = def;
                 byDef[def] = book;
@@ -179,6 +259,11 @@ namespace Diabloid.Books
             var tomeDef = tomeIndex != ItemIndex.None ? ItemCatalog.GetItemDef(tomeIndex) : null;
             var tomePickup = tomeIndex != ItemIndex.None ? PickupCatalog.GetPickupDef(PickupCatalog.FindPickupIndex(tomeIndex)) : null;
 
+            // Свиток — моделька Военных облигаций (War Bonds, Seekers of the Storm); не нашлась — как книга.
+            var bondsIndex = ItemCatalog.FindItemIndex("BarrageOnBoss");
+            var bondsDef = bondsIndex != ItemIndex.None ? ItemCatalog.GetItemDef(bondsIndex) : null;
+            var bondsPickup = bondsDef ? PickupCatalog.GetPickupDef(PickupCatalog.FindPickupIndex(bondsIndex)) : null;
+
             pickups.Clear();
             foreach (var book in books)
             {
@@ -187,22 +272,25 @@ namespace Diabloid.Books
                 if (!pickupIndex.isValid) continue;
                 pickups.Add(pickupIndex);
 
-                if (!tomeDef) continue;
+                bool scrollLook = book.IsScroll && bondsDef && bondsPickup != null;
+                var sourceDef = scrollLook ? bondsDef : tomeDef;
+                var sourcePickup = scrollLook ? bondsPickup : tomePickup;
+                if (!sourceDef) continue;
                 // В 1.5 иконка у ванильных предметов часто лежит только ссылкой (pickupIconSprite = null до загрузки),
                 // а значок снаряжения в HUD читает сам спрайт — без загрузки он белый квадрат (0.9.1). Грузим сразу.
-                var icon = LoadIcon(tomeDef);
-                book.Def.pickupModelPrefab = tomeDef.pickupModelPrefab;
-                book.Def.pickupModelReference = tomeDef.pickupModelReference;
+                var icon = LoadIcon(sourceDef);
+                book.Def.pickupModelPrefab = sourceDef.pickupModelPrefab;
+                book.Def.pickupModelReference = sourceDef.pickupModelReference;
                 book.Def.pickupIconSprite = icon;
-                book.Def.pickupIconSpriteReference = tomeDef.pickupIconSpriteReference;
+                book.Def.pickupIconSpriteReference = sourceDef.pickupIconSpriteReference;
                 var pickupDef = PickupCatalog.GetPickupDef(pickupIndex);
-                if (pickupDef != null && tomePickup != null)
+                if (pickupDef != null && sourcePickup != null)
                 {
-                    pickupDef.displayPrefab = tomePickup.displayPrefab;
-                    pickupDef.displayPrefabReference = tomePickup.displayPrefabReference;
-                    pickupDef.iconSprite = icon ? icon : tomePickup.iconSprite;
-                    pickupDef.iconSpriteReference = tomePickup.iconSpriteReference;
-                    pickupDef.iconTexture = icon ? icon.texture : tomePickup.iconTexture;
+                    pickupDef.displayPrefab = sourcePickup.displayPrefab;
+                    pickupDef.displayPrefabReference = sourcePickup.displayPrefabReference;
+                    pickupDef.iconSprite = icon ? icon : sourcePickup.iconSprite;
+                    pickupDef.iconSpriteReference = sourcePickup.iconSpriteReference;
+                    pickupDef.iconTexture = icon ? icon.texture : sourcePickup.iconTexture;
                 }
             }
 
@@ -211,10 +299,11 @@ namespace Diabloid.Books
             DiabloidPlugin.Log.LogInfo($"Registered {pickups.Count} book(s).");
         }
 
-        private static Sprite LoadIcon(ItemDef source)
+        private static Sprite LoadIcon(ItemDef source) => LoadSprite(source.pickupIconSprite, source.pickupIconSpriteReference);
+
+        private static Sprite LoadSprite(Sprite sprite, UnityEngine.AddressableAssets.AssetReference reference)
         {
-            if (source.pickupIconSprite) return source.pickupIconSprite;
-            var reference = source.pickupIconSpriteReference;
+            if (sprite) return sprite;
             if (reference == null || !reference.RuntimeKeyIsValid()) return null;
             try
             {
@@ -233,6 +322,17 @@ namespace Diabloid.Books
             foreach (var book in books)
                 if (book.Def && book.Def.equipmentIndex == index) return true;
             return false;
+        }
+
+        /// <summary>Все зарегистрированные книги: название + пикап (для отладочного меню).</summary>
+        public static System.Collections.Generic.IEnumerable<System.Collections.Generic.KeyValuePair<Words, PickupIndex>> DebugList()
+        {
+            foreach (var book in books)
+            {
+                if (!book.Def || book.Def.equipmentIndex == EquipmentIndex.None) continue;
+                var pickupIndex = PickupCatalog.FindPickupIndex(book.Def.equipmentIndex);
+                if (pickupIndex.isValid) yield return new System.Collections.Generic.KeyValuePair<Words, PickupIndex>(book.Name, pickupIndex);
+            }
         }
 
         /// <summary>Случайная книга как пикап (для дропа с мобов и артефакта снаряжения).</summary>
@@ -256,6 +356,10 @@ namespace Diabloid.Books
                     case BookType.KnifeStorm: return BookEffects.Knives(body);
                     case BookType.PhilosopherStone: return BookEffects.Stone(body);
                     case BookType.Adventurer: return BookEffects.Adventurer(body);
+                    case BookType.ScrollRuin:
+                    case BookType.ScrollRetinue:
+                    case BookType.ScrollWard:
+                    case BookType.ScrollFortune: return false; // свиток — только перки
                 }
                 return false;
             }

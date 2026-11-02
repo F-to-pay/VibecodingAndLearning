@@ -125,6 +125,13 @@ namespace Diabloid.Content
             {
                 string sourceName = DiabloidConfig.SlotModels[s].Value;
                 var sourceIndex = ItemCatalog.FindItemIndex(sourceName);
+                if (sourceIndex == ItemIndex.None && s < DiabloidConfig.FallbackModels.Length)
+                {
+                    string fallback = DiabloidConfig.FallbackModels[s];
+                    DiabloidPlugin.Log.LogWarning($"Item '{sourceName}' for the {(GearSlot)s} model was not found (DLC?), using '{fallback}'.");
+                    sourceName = fallback;
+                    sourceIndex = ItemCatalog.FindItemIndex(sourceName);
+                }
                 if (sourceIndex == ItemIndex.None)
                 {
                     DiabloidPlugin.Log.LogWarning($"Item '{sourceName}' for the {(GearSlot)s} model was not found, '?' model will be used.");
@@ -199,7 +206,7 @@ namespace Diabloid.Content
         private static readonly FieldInfo deprecatedTierField =
             typeof(ItemDef).GetField("deprecatedTier", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
 
-        private static void SetTier(ItemDef def, ItemTier tier)
+        internal static void SetTier(ItemDef def, ItemTier tier)
         {
             if (deprecatedTierField == null)
             {

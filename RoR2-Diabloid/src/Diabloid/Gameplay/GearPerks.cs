@@ -17,7 +17,7 @@ namespace Diabloid.Gameplay
     ///   сфера ауры — косметика, у каждого своя.
     /// Одинаковые перки с разных шмоток работают по отдельности: две ауры — два радиуса и два урона.
     /// </summary>
-    internal sealed class PerkManager : MonoBehaviour
+    internal sealed partial class PerkManager : MonoBehaviour
     {
         private const float AuraTickInterval = 0.5f;
 
@@ -26,8 +26,11 @@ namespace Diabloid.Gameplay
 
         public static Material AuraMaterial { get; private set; }
 
-        /// <summary>Бафф "боевой клич бега": +20% базового урона. Вешает сервер, синхронизирует игра — статы честные у всех.</summary>
+        /// <summary>Бафф "боевой клич": стаки × 2% базового урона. Вешает сервер, синхронизирует игра — статы честные у всех.</summary>
         public static BuffDef WarcryBuff { get; private set; }
+
+        /// <summary>Заряды клича у бегущего (0.17.0). Сами ничего не дают — только счётчик и иконка.</summary>
+        public static BuffDef WarcryChargeBuff { get; private set; }
 
         /// <summary>Метка мини-голема: скорость ×2, урон ×0.3, размер ×0.5. Бафф, а не компонент, — чтобы клиенты тоже знали.</summary>
         public static BuffDef MiniGolemBuff { get; private set; }
@@ -63,7 +66,7 @@ namespace Diabloid.Gameplay
             WarcryBuff = ScriptableObject.CreateInstance<BuffDef>();
             WarcryBuff.name = "bdDiabloidPerkWarcry";
             WarcryBuff.buffColor = new Color32(255, 140, 60, 255);
-            WarcryBuff.canStack = false;
+            WarcryBuff.canStack = true; // 0.17.0: стаки = заряды выкрикнувшего
             WarcryBuff.isDebuff = false;
             ContentAddition.AddBuffDef(WarcryBuff);
 
@@ -78,6 +81,9 @@ namespace Diabloid.Gameplay
             SwarmWispBuff = NewBuff("bdDiabloidSwarmWisp", new Color32(200, 200, 255, 255), stack: false);
             SolusBuff = NewBuff("bdDiabloidSolusAlly", new Color32(255, 220, 120, 255), stack: false);
             CastingBuff = NewBuff("bdDiabloidSolusCast", new Color32(255, 220, 120, 255), stack: true);
+            WarcryChargeBuff = NewBuff("bdDiabloidWarcryCharge", new Color32(255, 200, 140, 255), stack: true);
+            RegisterNewPerks(); // 0.14.0 — GearPerks.New.cs
+            RegisterBanana();   // 0.18.0 — GearPerks.Banana.cs
 
             RecalculateStatsAPI.GetStatCoefficients += OnGetStatCoefficients;
             GlobalEventManager.onServerDamageDealt += OnServerDamageDealt;
@@ -97,7 +103,7 @@ namespace Diabloid.Gameplay
             return buff;
         }
 
-        /// <summary>Опыт команды игроков: +10% за каждый перк опыта у любого игрока (опыт в RoR2 общий на команду).</summary>
+        /// <summary>Опыт команды игроков: +50% за каждый перк опыта у любого игрока (опыт в RoR2 общий на команду).</summary>
         private static void OnGiveTeamExperience(On.RoR2.TeamManager.orig_GiveTeamExperience orig, TeamManager self, TeamIndex teamIndex, ulong experience)
         {
             if (teamIndex == TeamIndex.Player && experience > 0)
@@ -127,11 +133,14 @@ namespace Diabloid.Gameplay
         {
             if (RoR2Content.Buffs.ArmorBoost) ArmorBuff.iconSprite = RoR2Content.Buffs.ArmorBoost.iconSprite;
             if (RoR2Content.Buffs.WarCryBuff) WarcryBuff.iconSprite = RoR2Content.Buffs.WarCryBuff.iconSprite;
+            if (RoR2Content.Buffs.WarCryBuff) WarcryChargeBuff.iconSprite = RoR2Content.Buffs.WarCryBuff.iconSprite;
             if (RoR2Content.Buffs.ArmorBoost) MiniGolemBuff.iconSprite = RoR2Content.Buffs.ArmorBoost.iconSprite;
             if (RoR2Content.Buffs.CloakSpeed) MomentumBuff.iconSprite = RoR2Content.Buffs.CloakSpeed.iconSprite;
             if (RoR2Content.Buffs.ArmorBoost) SwarmWispBuff.iconSprite = RoR2Content.Buffs.ArmorBoost.iconSprite;
             if (RoR2Content.Buffs.ArmorBoost) SolusBuff.iconSprite = RoR2Content.Buffs.ArmorBoost.iconSprite;
             if (RoR2Content.Buffs.Entangle) CastingBuff.iconSprite = RoR2Content.Buffs.Entangle.iconSprite;
+            OnCatalogsReadyNew();
+            OnCatalogsReadyBanana();
             try { explosionEffect = LegacyResourcesAPI.Load<GameObject>("Prefabs/Effects/OmniEffect/OmniExplosionVFXQuick"); }
             catch (Exception e) { DiabloidPlugin.Log.LogWarning($"Perks: explosion effect not loaded: {e.Message}"); }
             // Сфера ауры игрока — тот же материал, что у часовщика: другого готового у игры под рукой нет.
@@ -169,7 +178,8 @@ namespace Diabloid.Gameplay
             var health = body.healthComponent;
             if (!health || !health.alive) return 0;
             float missing = Mathf.Max(0f, health.fullHealth - health.health);
-            return Mathf.FloorToInt(missing / Perks.BerserkHealthStep);
+            float step = health.fullHealth * Perks.BerserkHealthStepPercent / 100f;
+            return step > 0f ? Mathf.FloorToInt(missing / step) : 0;
         }
 
         private static bool IsEnemy(TeamIndex mine, CharacterBody victim)
@@ -185,9 +195,10 @@ namespace Diabloid.Gameplay
         {
             if (!body) return;
 
-            // Боевой клич бега (на любом союзнике, не только игроке): +20% базового урона персонажа на его уровне.
-            if (WarcryBuff && body.HasBuff(WarcryBuff))
-                args.baseDamageAdd += (body.baseDamage + body.levelDamage * (body.level - 1f)) * Perks.WarcryDamagePercent / 100f;
+            // Боевой клич (на любом союзнике, не только игроке): стаки × 2% базового урона персонажа на его уровне.
+            int warcryStacks = WarcryBuff ? body.GetBuffCount(WarcryBuff) : 0;
+            if (warcryStacks > 0)
+                args.baseDamageAdd += (body.baseDamage + body.levelDamage * (body.level - 1f)) * Perks.WarcryDamagePercent / 100f * warcryStacks;
 
             // Огонёк роя: здоровье ×10, урон ×0.2.
             if (SwarmWispBuff && body.HasBuff(SwarmWispBuff))
@@ -212,9 +223,29 @@ namespace Diabloid.Gameplay
                 args.damageMultAdd += Perks.GolemDamage - 1f;
             }
 
+            // Души, замедление, украденная скорость — предмет и баффы, без перков владельца.
+            NewPerkStats(body, args);
+            BananaStats(body, args);
+
             if (!body.master) return;
             var perks = PerksOf(body.master);
             if (perks.Count == 0) return;
+
+            // Опыт (0.17.0): за каждый такой перк основные статы ×0.8. TotalMult — множитель поверх всех бонусов.
+            int xpPerks = 0;
+            foreach (var (perk, _) in perks)
+                if (perk.Type == PerkType.XpBonus) xpPerks++;
+            if (xpPerks > 0)
+            {
+                float mult = (float)Math.Pow(1f - Perks.XpPenaltyPercent / 100f, xpPerks);
+                args.damageTotalMult *= mult;
+                args.attackSpeedTotalMult *= mult;
+                args.healthTotalMult *= mult;
+                args.shieldTotalMult *= mult;
+                args.regenTotalMult *= mult;
+                args.armorTotalMult *= mult;
+                args.moveSpeedTotalMult *= mult;
+            }
 
             // Разгон: стаки баффа × (1% × уровень шмотки) с каждого такого перка — прибавка к множителю бега.
             int momentum = MomentumBuff ? body.GetBuffCount(MomentumBuff) : 0;
@@ -257,7 +288,11 @@ namespace Diabloid.Gameplay
             if (report.victimMaster && report.damageDealt > 0f)
             {
                 var perks = PerksOf(report.victimMaster);
-                if (perks.Count > 0) OnPlayerHurt(report.victimBody, perks, report.damageDealt);
+                if (perks.Count > 0)
+                {
+                    OnPlayerHurt(report.victimBody, perks, report.damageDealt);
+                    Reflect(report, perks);
+                }
             }
 
             // Атакующий — игрок с ударом по % ХП. Шанс × proc coefficient, как у ванильных предметов;
@@ -267,6 +302,8 @@ namespace Diabloid.Gameplay
             if (report.attackerBody == report.victimBody) return;
             var attackerPerks = PerksOf(report.attackerMaster);
             if (attackerPerks.Count == 0) return;
+
+            TryInfect(report, attackerPerks, proc);
 
             var victimHealth = report.victimBody.healthComponent;
             foreach (var (perk, _) in attackerPerks)
@@ -387,6 +424,8 @@ namespace Diabloid.Gameplay
             var perks = PerksOf(report.attackerMaster);
             if (perks.Count == 0) return;
 
+            KillDamageOnKill(report, perks);
+
             foreach (var (perk, _) in perks)
             {
                 if (perk.Type != PerkType.WispOnKill) continue;
@@ -436,28 +475,13 @@ namespace Diabloid.Gameplay
             var health = body.healthComponent;
             if (!health || !health.alive) return;
 
-            // Рой огоньков: 10% при получении урона, не чаще раза в 2 с на перк. Турелям Инженера — нет (их бьют без конца).
-            if (!GearRegistry.InheritsGear(body.master))
-            {
-                int swarmIndex = 0;
-                foreach (var (perk, _) in perks)
-                {
-                    if (perk.Type != PerkType.HurtWispSwarm) continue;
-                    var swarmState = body.GetComponent<PerkBodyState>();
-                    if (!swarmState) swarmState = body.gameObject.AddComponent<PerkBodyState>();
-                    if (swarmState.SwarmReady(swarmIndex++, Time.time) && Util.CheckRoll(Perks.SwarmChance, body.master))
-                    {
-                        swarmState.SwarmUsed(swarmIndex - 1, Time.time + Perks.SwarmInternalCooldown);
-                        SummonSwarm(body);
-                    }
-                }
-            }
+            // Рой огоньков (HurtWispSwarm) убран в 0.15.3.
 
             PerkBodyState state = null;
             int index = 0;
             foreach (var (perk, _) in perks)
             {
-                if (perk.Type != PerkType.ArmorOnHurt) continue;
+                if (perk.Type != PerkType.ArmorOnHurt) continue; // перк убран в 0.17.1 — сюда уже не попадает
                 if (!state)
                 {
                     state = body.GetComponent<PerkBodyState>();
@@ -474,16 +498,6 @@ namespace Diabloid.Gameplay
                     body.MarkAllStatsDirty();
                 }
                 index++;
-            }
-        }
-
-        private static void SummonSwarm(CharacterBody owner)
-        {
-            for (int i = 0; i < Perks.SwarmCount; i++)
-            {
-                var position = owner.corePosition + UnityEngine.Random.insideUnitSphere * 4f + Vector3.up * 2f;
-                var master = Summon("WispMaster", position, owner, Perks.SwarmLifetime);
-                MarkWithBuff(master, SwarmWispBuff);
             }
         }
 
@@ -574,30 +588,32 @@ namespace Diabloid.Gameplay
         }
 
         /// <summary>
-        /// Перк книги: книга в активном слоте снаряжения → случайный перк (уровень = уровень монстров сейчас).
-        /// Новая книга (другой тип) — новый перк; книги нет — перка нет. Рассылается клиентам вместе с экипировкой.
+        /// Перки снаряжения (0.15.0): книга в активном слоте → её постоянный перк, свиток → его 3 перка
+        /// (броски случайные). Уровень = уровень монстров при подборе. Сменилось снаряжение —
+        /// перки заново; книги/свитка нет — перков нет. Рассылается клиентам вместе с экипировкой.
         /// </summary>
         private void TickBookPerk(CharacterMaster master)
         {
             var inventory = master.inventory;
             var index = inventory ? inventory.currentEquipmentIndex : EquipmentIndex.None;
-            bool hasBook = Diabloid.Books.GearBooks.IsBook(index);
+            bool hasBook = Diabloid.Books.GearBooks.TryGetBook(index, out _, out var bookPerks);
             var gear = GearRegistry.Find(master);
 
             if (hasBook)
             {
-                if (gear != null && gear.BookPerk.HasValue && bookOf.TryGetValue(master.netId, out var last) && last == index) return;
+                if (gear != null && gear.BookPerks.Count > 0 && bookOf.TryGetValue(master.netId, out var last) && last == index) return;
                 gear = GearRegistry.GetOrCreate(master);
-                var types = (PerkType[])Enum.GetValues(typeof(PerkType));
-                gear.BookPerk = new Perk(types[LootRoller.Rng.Next(types.Length)], (float)LootRoller.Rng.NextDouble());
+                gear.BookPerks.Clear();
+                var rng = LootRoller.Rng;
+                foreach (var type in bookPerks) gear.BookPerks.Add(new Perk(type, (float)rng.NextDouble()));
                 gear.BookPerkLevel = LootRoller.CurrentItemLevel();
                 bookOf[master.netId] = index;
             }
             else
             {
                 bookOf.Remove(master.netId);
-                if (gear == null || !gear.BookPerk.HasValue) return;
-                gear.BookPerk = null;
+                if (gear == null || gear.BookPerks.Count == 0) return;
+                gear.BookPerks.Clear();
             }
 
             GearRegistry.MarkStatsDirty(master);
@@ -638,10 +654,14 @@ namespace Diabloid.Gameplay
                     // Перки сняли — убрать их следы (стаки разгона, индикатор каста).
                     if (MomentumBuff && body.GetBuffCount(MomentumBuff) > 0) body.SetBuffCount(MomentumBuff.buffIndex, 0);
                     if (CastingBuff && body.GetBuffCount(CastingBuff) > 0) body.SetBuffCount(CastingBuff.buffIndex, 0);
+                    if (WarcryChargeBuff && body.GetBuffCount(WarcryChargeBuff) > 0) body.SetBuffCount(WarcryChargeBuff.buffIndex, 0);
+                    SetStolenSpeed(body, 0);
                     continue;
                 }
 
-                int regenPerks = 0, golemIndex = 0, solusIndex = 0;
+                CheckBanana(perks); // 0.18.0: банан — карма и финальные боссы, раз на забег
+
+                int regenPerks = 0, golemIndex = 0, solusIndex = 0, slowPerks = 0;
                 bool momentum = false;
                 bool warcry = false;
                 foreach (var (perk, _) in perks)
@@ -649,6 +669,7 @@ namespace Diabloid.Gameplay
                     switch (perk.Type)
                     {
                         case PerkType.MissingHpRegen: regenPerks++; break;
+                        case PerkType.SlowAura: slowPerks++; break;
                         case PerkType.DamageAura: if (auraTick) AuraTick(body, perk); break;
                         case PerkType.SprintWarcry: warcry = !isTurret; break;
                         case PerkType.SprintMomentum: momentum = !isTurret; break;
@@ -667,8 +688,17 @@ namespace Diabloid.Gameplay
                     }
                 }
 
-                // Боевой клич бега: раз в 0.5 с бафф на 1 с себе и союзникам в радиусе. Бег сервер знает — его шлёт клиент.
-                if (warcry && auraTick && body.isSprinting) WarcryTick(body);
+                // Замедляющая аура (0.14.0): раз в 0.5 с; перк сняли — украденная скорость в ноль.
+                if (slowPerks > 0) { if (auraTick) SlowAuraTick(body, slowPerks); }
+                else SetStolenSpeed(body, 0);
+
+                // Боевой клич (0.17.0): бег копит заряды, остановка — выкрик. Бег сервер знает — его шлёт клиент.
+                if (warcry)
+                {
+                    if (!state) state = body.gameObject.AddComponent<PerkBodyState>();
+                    TickWarcry(body, state, dt);
+                }
+                else if (WarcryChargeBuff && body.GetBuffCount(WarcryChargeBuff) > 0) body.SetBuffCount(WarcryChargeBuff.buffIndex, 0);
 
                 if (momentum)
                 {
@@ -678,27 +708,63 @@ namespace Diabloid.Gameplay
                 else if (MomentumBuff && body.GetBuffCount(MomentumBuff) > 0) body.SetBuffCount(MomentumBuff.buffIndex, 0);
                 if (solusIndex == 0 && CastingBuff && body.GetBuffCount(CastingBuff) > 0) body.SetBuffCount(CastingBuff.buffIndex, 0);
 
-                // Реген от недостающего здоровья: лечение как регенерация (nonRegen = false), каждый физический кадр.
+                // Регенерация (0.17.1): 0.5% макс. + 3% текущего здоровья в секунду за перк. Лечение как регенерация
+                // (nonRegen = false), каждый физический кадр. На полном здоровье Heal ничего не делает.
                 if (regenPerks > 0)
                 {
                     var health = body.healthComponent;
-                    float missing = health.fullHealth - health.health;
-                    float amount = missing * Perks.MissingHpRegenPercent / 100f * regenPerks * dt;
-                    if (amount > 0.001f) health.Heal(amount, default(ProcChainMask), false);
+                    if (health.health < health.fullHealth)
+                    {
+                        float perSecond = health.fullHealth * Perks.RegenMaxHpPercent / 100f + health.health * Perks.RegenCurrentHpPercent / 100f;
+                        float amount = perSecond * regenPerks * dt;
+                        if (amount > 0.001f) health.Heal(amount, default(ProcChainMask), false);
+                    }
                 }
             }
         }
 
-        private void WarcryTick(CharacterBody source)
+        /// <summary>
+        /// Клич (0.17.0): каждую секунду бега +1 заряд (до 15). Бег прекратился — выкрик с накопленными зарядами,
+        /// заряды в ноль, КД 10 с (пока КД — бег не заряжает). Несколько перков клича = один клич.
+        /// </summary>
+        private static void TickWarcry(CharacterBody body, PerkBodyState state, float dt)
+        {
+            int charge = body.GetBuffCount(WarcryChargeBuff);
+            if (body.isSprinting)
+            {
+                if (Time.time < state.WarcryReadyAt) { state.WarcryTimer = 0f; return; }
+                state.WarcryTimer += dt;
+                if (state.WarcryTimer >= Perks.WarcryChargeInterval)
+                {
+                    state.WarcryTimer -= Perks.WarcryChargeInterval;
+                    if (charge < Perks.WarcryMaxStacks) body.AddBuff(WarcryChargeBuff);
+                }
+                return;
+            }
+
+            state.WarcryTimer = 0f;
+            if (charge <= 0) return;
+            body.SetBuffCount(WarcryChargeBuff.buffIndex, 0);
+            state.WarcryReadyAt = Time.time + Perks.WarcryCooldown;
+            Warcry(body, charge);
+        }
+
+        /// <summary>
+        /// Выкрик: себе и союзникам в радиусе — stacks стаков баффа на 10 с. Более слабый клич не перебивает
+        /// более сильный, равный или сильнее — обновляет таймер.
+        /// </summary>
+        private static void Warcry(CharacterBody source, int stacks)
         {
             var team = source.teamComponent ? source.teamComponent.teamIndex : TeamIndex.Player;
             float radiusSqr = Perks.WarcryRadius * Perks.WarcryRadius;
-            foreach (var ally in bodies)
+            foreach (var ally in CharacterBody.readOnlyInstancesList)
             {
                 if (!ally || !ally.healthComponent || !ally.healthComponent.alive) continue;
                 if (!ally.teamComponent || ally.teamComponent.teamIndex != team) continue;
                 if ((ally.corePosition - source.corePosition).sqrMagnitude > radiusSqr) continue;
-                ally.AddTimedBuff(WarcryBuff, AuraTickInterval * 2f);
+                if (ally.GetBuffCount(WarcryBuff) > stacks) continue;
+                ally.ClearTimedBuffs(WarcryBuff);
+                for (int i = 0; i < stacks; i++) ally.AddTimedBuff(WarcryBuff, Perks.WarcryDuration);
             }
         }
 
@@ -841,6 +907,10 @@ namespace Diabloid.Gameplay
 
         // 0.10.0
         public float MomentumTimer;
+
+        // 0.17.0 — клич: таймер заряда и когда снова можно копить
+        public float WarcryTimer;
+        public float WarcryReadyAt;
 
         // Стоит ли персонаж: позицию игрока-клиента сервер получает рывками (не каждый физический кадр),
         // поэтому сравниваем не соседние кадры, а точки раз в 0.25 с: сдвинулся меньше чем на 20 см — стоит.

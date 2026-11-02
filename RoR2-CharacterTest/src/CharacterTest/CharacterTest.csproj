@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- RoR2 (Unity 2021.3, Mono) понимает netstandard2.1 -->
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>CharacterTest</AssemblyName>
+    <RootNamespace>CharacterTest</RootNamespace>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <DebugType>embedded</DebugType>
+    <!-- CS0618: устаревшие члены игры; NU1701: пакеты под .NET Framework; Publicizer001: доступ к private через публицированные GameLibs -->
+    <NoWarn>$(NoWarn);CS0618;NU1701;Publicizer001</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BepInEx.Core" Version="5.4.21" />
+    <PackageReference Include="UnityEngine.Modules" Version="2021.3.33" IncludeAssets="compile" />
+
+    <!-- Публицированные библиотеки игры (nuget.bepinex.dev). 1.*-* = самая свежая, включая пре-релизы. -->
+    <PackageReference Include="RiskOfRain2.GameLibs" Version="1.*-*" IncludeAssets="compile" />
+
+    <!-- On.* / IL.* хуки (пока не используются, но персонажу понадобятся). Версия под игру 1.5.0, как в Destroyer. -->
+    <PackageReference Include="MMHOOK.RoR2" Version="2026.10.8" IncludeAssets="compile" />
+
+    <PackageReference Include="R2API.Core" Version="5.*" />
+    <PackageReference Include="R2API.Language" Version="1.*" />
+    <PackageReference Include="R2API.ContentManagement" Version="1.*" />
+
+    <!-- Меню настроек в игре. Зависимость мягкая: без Risk of Options мод тоже работает. -->
+    <PackageReference Include="Rune580.Mods.RiskOfRain2.RiskOfOptions" Version="2.8.*" />
+  </ItemGroup>
+
+  <!--
+    Автокопирование в профиль r2modman после сборки. Путь — в Directory.Build.props.user (см. README)
+    или разово: dotnet build -p:ProfilePlugins="...\profiles\CharacterTest\BepInEx\plugins"
+  -->
+  <Import Project="..\..\Directory.Build.props.user" Condition="Exists('..\..\Directory.Build.props.user')" />
+
+  <Target Name="CopyToProfile" AfterTargets="Build" Condition="'$(ProfilePlugins)' != ''">
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(ProfilePlugins)\CharacterTest" />
+    <Message Importance="high" Text="CharacterTest.dll скопирован в $(ProfilePlugins)\CharacterTest" />
+  </Target>
+
+</Project>

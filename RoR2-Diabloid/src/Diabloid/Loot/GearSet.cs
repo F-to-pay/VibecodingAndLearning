@@ -12,10 +12,10 @@ namespace Diabloid.Loot
         private readonly GearItem[] items = new GearItem[Slots.Count];
 
         /// <summary>
-        /// Перк книги: пока в слоте снаряжения лежит книга, у игрока есть ещё один случайный перк.
-        /// Выпадает при подборе книги (уровень — уровень монстров в тот момент), пропадает, когда книги нет.
+        /// Перки снаряжения: пока в слоте лежит книга — её постоянный перк (0.15.0; бросок — при подборе),
+        /// свиток — 3 разных случайных. Уровень — уровень монстров при подборе; нет книги — список пуст.
         /// </summary>
-        public Perk? BookPerk;
+        public readonly List<Perk> BookPerks = new List<Perk>();
         public int BookPerkLevel = 1;
 
         public GearItem Get(GearSlot slot) => items[(int)slot];
@@ -34,7 +34,7 @@ namespace Diabloid.Loot
         {
             get
             {
-                if (BookPerk.HasValue) return false;
+                if (BookPerks.Count > 0) return false;
                 foreach (var item in items)
                     if (item != null) return false;
                 return true;
@@ -73,18 +73,68 @@ namespace Diabloid.Loot
         /// </summary>
         public void CollectPerks(List<(Perk perk, int level)> into)
         {
+            Perk? banana = null;
+            int bananaLevel = 1, bananas = 0;
             foreach (var item in items)
             {
                 if (item == null || item.Perks.Count == 0) continue;
                 var current = item.Current();
-                foreach (var perk in current.Perks) into.Add((perk, current.Level));
+                foreach (var perk in current.Perks)
+                {
+                    into.Add((perk, current.Level));
+                    if (perk.Type != PerkType.Banana) continue;
+                    bananas++;
+                    if (banana == null) { banana = perk; bananaLevel = current.Level; }
+                }
             }
-            if (BookPerk.HasValue) into.Add((BookPerk.Value, BookPerkLevel));
+            foreach (var perk in BookPerks) into.Add((perk, BookPerkLevel));
+
+            // Банан (0.18.0): все остальные перки разом, с броском и уровнем первого банана. 0.18.1: только от трёх
+            // бананов (меньше — ничего), и сколько бы их ни было сверху — набор один. Совпавшие с настоящими перками
+            // работают вдобавок к ним (как два одинаковых перка).
+            if (banana != null && bananas >= Perks.BananasRequired)
+                foreach (var type in Perks.Rollable())
+                    if (Perks.GrantedByBanana(type)) into.Add((new Perk(type, banana.Value.Roll), bananaLevel));
         }
+
+        /// <summary>Сияние книги и свитка в слоте снаряжения (0.19.0).</summary>
+        public const int BookRadiance = 1, ScrollRadiance = 2;
+
+        /// <summary>
+        /// Сияние (0.19.0): сумма по надетым шмоткам (по качеству, от уровня не зависит) + книга/свиток.
+        /// Что оно делает — Gameplay/Radiance.cs.
+        /// </summary>
+        public int Radiance()
+        {
+            int sum = 0;
+            foreach (var item in items)
+                if (item != null) sum += Qualities.Get(item.Quality).Radiance;
+            if (BookPerks.Count > 1) sum += ScrollRadiance;
+            else if (BookPerks.Count == 1) sum += BookRadiance;
+            return sum;
+        }
+
+        /// <summary>Сколько надето шмоток с бананом.</summary>
+        public int BananaCount()
+        {
+            int count = 0;
+            foreach (var item in items)
+            {
+                if (item == null) continue;
+                foreach (var perk in item.Perks)
+                    if (perk.Type == PerkType.Banana) count++;
+            }
+            return count;
+        }
+
+        /// <summary>Бананов хватает (3+) — банан работает.</summary>
+        public bool BananaUnlocked => BananaCount() >= Perks.BananasRequired;
 
         public bool HasPerk(PerkType type)
         {
-            if (BookPerk.HasValue && BookPerk.Value.Type == type) return true;
+            if (Perks.GrantedByBanana(type) && BananaUnlocked) return true;
+            foreach (var perk in BookPerks)
+                if (perk.Type == type) return true;
             foreach (var item in items)
             {
                 if (item == null) continue;

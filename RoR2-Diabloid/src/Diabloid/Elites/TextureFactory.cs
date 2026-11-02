@@ -78,6 +78,40 @@ namespace Diabloid.Elites
                 foreground: selected ? new Color(0.80f, 0.86f, 0.95f, 1f) : new Color(0.55f, 0.55f, 0.55f, 1f));
         }
 
+        /// <summary>Иконка артефакта нетерпения: молния. Включённый — жёлтая на багровом, выключенный — серая.</summary>
+        public static Sprite CreateImpatienceArtifactIcon(bool selected)
+        {
+            Vector2[] bolt =
+            {
+                new Vector2(0.52f, 0.82f), new Vector2(0.66f, 0.82f), new Vector2(0.54f, 0.56f),
+                new Vector2(0.70f, 0.56f), new Vector2(0.40f, 0.16f), new Vector2(0.48f, 0.44f),
+                new Vector2(0.32f, 0.44f),
+            };
+
+            return DrawIcon(selected ? "texDiabloidImpatienceOn" : "texDiabloidImpatienceOff", bolt,
+                background: selected ? new Color(0.22f, 0.06f, 0.06f, 1f) : new Color(0.12f, 0.12f, 0.12f, 1f),
+                rim: selected ? new Color(1f, 0.45f, 0.15f, 1f) : new Color(0.35f, 0.35f, 0.35f, 1f),
+                foreground: selected ? new Color(1f, 0.90f, 0.25f, 1f) : new Color(0.55f, 0.55f, 0.55f, 1f));
+        }
+
+        /// <summary>Иконка артефакта перевёртыша: раскрытая книга. Включённый — золотая на зелёном, выключенный — серая.</summary>
+        public static Sprite CreateShapeshifterArtifactIcon(bool selected)
+        {
+            // Раскрытая книга: две страницы, корешок внизу посередине.
+            Vector2[] book =
+            {
+                new Vector2(0.18f, 0.70f), new Vector2(0.34f, 0.74f), new Vector2(0.50f, 0.66f),
+                new Vector2(0.66f, 0.74f), new Vector2(0.82f, 0.70f), new Vector2(0.82f, 0.32f),
+                new Vector2(0.66f, 0.36f), new Vector2(0.50f, 0.28f), new Vector2(0.34f, 0.36f),
+                new Vector2(0.18f, 0.32f),
+            };
+
+            return DrawIcon(selected ? "texDiabloidShapeshifterOn" : "texDiabloidShapeshifterOff", book,
+                background: selected ? new Color(0.06f, 0.18f, 0.10f, 1f) : new Color(0.12f, 0.12f, 0.12f, 1f),
+                rim: selected ? new Color(0.35f, 0.85f, 0.45f, 1f) : new Color(0.35f, 0.35f, 0.35f, 1f),
+                foreground: selected ? new Color(1f, 0.82f, 0.35f, 1f) : new Color(0.55f, 0.55f, 0.55f, 1f));
+        }
+
         /// <summary>Круглая иконка 128×128: ободок, фон и залитый многоугольник по центру.</summary>
         private static Sprite DrawIcon(string name, Vector2[] shape, Color background, Color rim, Color foreground)
         {

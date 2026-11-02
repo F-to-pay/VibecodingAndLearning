@@ -66,8 +66,10 @@ namespace Diabloid.Gameplay
 
             // Перезарядку режем с потолком, иначе на лупах можно уйти в 0 секунд.
             // Отрицательное значение (лунное проклятие) потолком не режется — перезарядка просто дольше.
+            // 0.16.1: R2API берёт Math.Max(0, cooldownMultAdd) — минус там молча обнулялся, стат не работал вообще.
+            // cooldownMultiplier (по умолчанию 1) умножает итоговую шкалу: −30% → ×0.7, проклятие −(−10%) → ×1.1.
             float cdr = Math.Min(Get(StatType.CooldownReduction), DiabloidConfig.CooldownReductionCap.Value);
-            args.allSkills.cooldownMultAdd -= cdr / 100f;
+            if (Math.Abs(cdr) > 0.0001f) args.allSkills.cooldownMultiplier *= 1f - cdr / 100f;
         }
 
         private static float Get(StatType stat) => totals[(int)stat];

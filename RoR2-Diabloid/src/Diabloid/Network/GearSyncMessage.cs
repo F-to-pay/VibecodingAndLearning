@@ -48,13 +48,16 @@ namespace Diabloid.Network
                 if (item != null) WriteItem(writer, item);
             }
 
-            // 0.10.0: перк книги — bool есть? | byte тип | float бросок | int уровень
-            var book = gear?.BookPerk;
-            writer.Write(book.HasValue);
-            if (book.HasValue)
+            // 0.15.0: перки снаряжения — byte n | (byte тип | float бросок) × n | int уровень (если n > 0)
+            int count = gear != null ? gear.BookPerks.Count : 0;
+            writer.Write((byte)count);
+            if (count > 0)
             {
-                writer.Write((byte)book.Value.Type);
-                writer.Write(book.Value.Roll);
+                foreach (var perk in gear.BookPerks)
+                {
+                    writer.Write((byte)perk.Type);
+                    writer.Write(perk.Roll);
+                }
                 writer.Write(gear.BookPerkLevel);
             }
         }
@@ -71,16 +74,16 @@ namespace Diabloid.Network
                 if (item != null) gear.Equip(item);
             }
 
-            if (reader.ReadBoolean())
+            int count = reader.ReadByte();
+            if (count > 0)
             {
-                byte type = reader.ReadByte();
-                float roll = reader.ReadSingle();
-                int level = reader.ReadInt32();
-                if (type < Perks.Count)
+                for (int i = 0; i < count; i++)
                 {
-                    gear.BookPerk = new Perk((PerkType)type, roll);
-                    gear.BookPerkLevel = level;
+                    byte type = reader.ReadByte();
+                    float roll = reader.ReadSingle();
+                    if (type < Perks.Count) gear.BookPerks.Add(new Perk((PerkType)type, roll));
                 }
+                gear.BookPerkLevel = reader.ReadInt32();
             }
         }
 

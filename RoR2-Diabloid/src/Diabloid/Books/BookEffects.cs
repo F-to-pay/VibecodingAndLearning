@@ -24,6 +24,7 @@ namespace Diabloid.Books
         // --- Перевёртыш ---
         public const float ShapeCooldown = 10f;  // КД против абуза неуязвимости при смене тела
         public const float ShapeDuration = 30f;  // через столько секунд после превращения — автоматически обратно
+        public const float ShapeMoveSpeed = 0.5f, ShapeDamage = 2f; // в форме: +50% скорости, +200% урона (0.15.3)
         // --- Шквал ножей ---
         public const float KnivesCooldown = 80f, KnivesDuration = 5f, KnivesDamage = 0.2f, KnivesProc = 0.1f;
         public const int KnivesCount = 50;
@@ -34,6 +35,9 @@ namespace Diabloid.Books
         public const float AdventureCooldown = 60f, AdventureRadius = 10f;
 
         public static BuffDef StealthSpeedBuff { get; private set; }
+
+        /// <summary>Перевёртыш в чужой форме: +50% скорости, +200% урона. Вешает сервер на каждое новое тело в форме.</summary>
+        public static BuffDef ShapeshiftBuff { get; private set; }
 
         private static GameObject explosionEffect, meteorWarningEffect, poiIndicator;
 
@@ -46,10 +50,24 @@ namespace Diabloid.Books
             StealthSpeedBuff.isDebuff = false;
             R2API.ContentAddition.AddBuffDef(StealthSpeedBuff);
 
+            ShapeshiftBuff = ScriptableObject.CreateInstance<BuffDef>();
+            ShapeshiftBuff.name = "bdDiabloidShapeshift";
+            ShapeshiftBuff.buffColor = new Color32(255, 204, 85, 255);
+            ShapeshiftBuff.canStack = false;
+            ShapeshiftBuff.isDebuff = false;
+            R2API.ContentAddition.AddBuffDef(ShapeshiftBuff);
+
             R2API.RecalculateStatsAPI.GetStatCoefficients += (body, args) =>
             {
-                if (body && StealthSpeedBuff && body.HasBuff(StealthSpeedBuff)) args.moveSpeedMultAdd += StealthSpeed;
+                if (!body) return;
+                if (StealthSpeedBuff && body.HasBuff(StealthSpeedBuff)) args.moveSpeedMultAdd += StealthSpeed;
+                if (ShapeshiftBuff && body.HasBuff(ShapeshiftBuff))
+                {
+                    args.moveSpeedMultAdd += ShapeMoveSpeed;
+                    args.damageMultAdd += ShapeDamage;
+                }
             };
+            CharacterBody.onBodyStartGlobal += body => { if (NetworkServer.active) Shapeshift.OnBodyStart(body); };
 
             // Перевёртыш: при смерти тело игрока должно снова стать своим (воскрешение — в своём теле).
             GlobalEventManager.onCharacterDeathGlobal += report =>
@@ -62,6 +80,7 @@ namespace Diabloid.Books
         public static void OnCatalogsReady()
         {
             if (RoR2Content.Buffs.CloakSpeed) StealthSpeedBuff.iconSprite = RoR2Content.Buffs.CloakSpeed.iconSprite;
+            if (RoR2Content.Buffs.FullCrit) ShapeshiftBuff.iconSprite = RoR2Content.Buffs.FullCrit.iconSprite;
             explosionEffect = TryLoad("Prefabs/Effects/OmniEffect/OmniExplosionVFXQuick");
             meteorWarningEffect = TryLoad("Prefabs/Effects/MeteorStrikePredictionEffect");
             poiIndicator = TryLoad("Prefabs/PositionIndicators/PoiPositionIndicator");
@@ -203,41 +222,80 @@ namespace Diabloid.Books
         public static bool Shapeshifter(CharacterBody owner) => Shapeshift.Use(owner, AimedEnemy(owner));
 
         /// <summary>
-        /// Перевёртыш. Первое применение: цель под прицелом (не босс телепорта) исчезает без наград, её форма
-        /// запоминается навсегда (на забег). Дальше книга — переключатель: превратиться / вернуться в своё тело.
-        /// Через ShapeDuration секунд после превращения — возврат автоматически (не все формы могут жать снаряжение).
-        /// Если этап сменился раньше — форма доживает таймер на новом этапе (master.bodyPrefab остаётся чужим).
-        /// master.TransformBody — тело пересоздаётся; инвентарь, шмотки и перки на мастере остаются,
-        /// доля здоровья сохраняется в обе стороны. КД 10 с — чтобы не абузить неуязвимость при смене тела.
-        /// Вручную вернуться можно только если у чужого тела есть EquipmentSlot; иначе — ждать таймер.
+        /// Перевёртыш. У каждой книги своя ячейка (0.15.3): ячейка = место снаряжения (слот × набор — у MUL-T два слота,
+        /// у Functional Coupler наборы). Пустая ячейка: цель под прицелом (не босс телепорта) исчезает без наград, её
+        /// форма запоминается в этой ячейке. Полная: превратиться в её форму / вернуться (та же книга) / сменить форму
+        /// (другая книга). Книга ушла из места (выбросил, сменил) — ячейка забывается: новая книга — пустая.
+        /// Через ShapeDuration секунд после превращения — возврат сам; в форме ShapeshiftBuff (+50% скорости, +200% урона).
+        /// master.TransformBody — тело пересоздаётся; инвентарь, шмотки и перки на мастере остаются, доля здоровья
+        /// сохраняется. КД 10 с — чтобы не абузить неуязвимость при смене тела. Смена этапа таймер не сбрасывает.
         /// </summary>
         internal static class Shapeshift
         {
             private sealed class State
             {
-                public string CapturedBody;   // имя тела в BodyCatalog ("LemurianBody")
+                public readonly Dictionary<int, string> Captured = new Dictionary<int, string>(); // ячейка → имя тела
                 public string OriginalBody;   // своё тело, пока превращён
                 public bool Transformed;      // сейчас в чужой форме
+                public int CurrentCell = -1;  // из какой ячейки форма
                 public int Generation;        // номер превращения — чтобы старый таймер не вернул из нового
             }
 
             private static readonly Dictionary<CharacterMaster, State> states = new Dictionary<CharacterMaster, State>();
+            private static readonly List<int> stale = new List<int>();
+            private static readonly List<CharacterMaster> deadMasters = new List<CharacterMaster>();
 
             public static void Clear() => states.Clear();
+
+            private static bool CurrentCell(CharacterMaster master, out int cell)
+            {
+                cell = -1;
+                var inventory = master.inventory;
+                if (!inventory) return false;
+                int slot = inventory.activeEquipmentSlot;
+                var sets = inventory.activeEquipmentSet;
+                int set = sets != null && slot < sets.Length ? sets[slot] : 0;
+                cell = slot * 256 + set;
+                return true;
+            }
+
+            private static bool IsShapeshifterAt(Inventory inventory, int cell)
+            {
+                var state = inventory.GetEquipment((uint)(cell / 256), (uint)(cell % 256));
+                return GearBooks.TryGetBook(state.equipmentIndex, out var type, out _) && type == BookType.Shapeshifter;
+            }
+
+            /// <summary>Забыть ячейки, где книги перевёртыша больше нет (сервер, раз в 0.25 с и перед применением).</summary>
+            public static void PruneAll()
+            {
+                if (states.Count == 0) return;
+                deadMasters.Clear();
+                foreach (var pair in states)
+                {
+                    if (!pair.Key) { deadMasters.Add(pair.Key); continue; }
+                    Prune(pair.Key, pair.Value);
+                }
+                foreach (var master in deadMasters) states.Remove(master);
+            }
+
+            private static void Prune(CharacterMaster master, State state)
+            {
+                var inventory = master.inventory;
+                if (!inventory || state.Captured.Count == 0) return;
+                stale.Clear();
+                foreach (var cell in state.Captured.Keys)
+                    if (!IsShapeshifterAt(inventory, cell)) stale.Add(cell);
+                foreach (var cell in stale) state.Captured.Remove(cell);
+            }
 
             public static bool Use(CharacterBody owner, HurtBox aimed)
             {
                 var master = owner.master;
-                if (!master) return false;
+                if (!master || !CurrentCell(master, out int cell)) return false;
                 if (!states.TryGetValue(master, out var state)) states[master] = state = new State();
-                if (state.Transformed)
-                {
-                    // Возврат — тоже на следующем тике (мы внутри EquipmentSlot текущего тела).
-                    BookRunner.Schedule(0.05f, () => Revert(master));
-                    return true;
-                }
+                Prune(master, state);
 
-                if (string.IsNullOrEmpty(state.CapturedBody))
+                if (!state.Captured.TryGetValue(cell, out var captured))
                 {
                     var health = aimed ? aimed.healthComponent : null;
                     var target = health ? health.body : null;
@@ -245,7 +303,7 @@ namespace Diabloid.Books
                     if (target.master && target.master.isBoss) return false; // босса телепорта не трогаем
                     if (target.isPlayerControlled) return false;
 
-                    state.CapturedBody = BodyCatalog.GetBodyName(target.bodyIndex);
+                    state.Captured[cell] = BodyCatalog.GetBodyName(target.bodyIndex);
                     string shown = target.GetDisplayName();
                     if (explosionEffect)
                         EffectManager.SpawnEffect(explosionEffect, new EffectData { origin = target.corePosition, scale = 3f }, true);
@@ -258,14 +316,21 @@ namespace Diabloid.Books
                     return true;
                 }
 
-                // Превращение — на следующем тике: сейчас мы внутри EquipmentSlot старого тела.
-                var captured = state.CapturedBody;
+                // Та же книга в форме — вернуться. Всё на следующем тике: сейчас мы внутри EquipmentSlot текущего тела.
+                if (state.Transformed && state.CurrentCell == cell)
+                {
+                    ScheduleRevert(master);
+                    return true;
+                }
+
+                // Превращение (или смена формы другой книгой).
                 BookRunner.Schedule(0.05f, () =>
                 {
                     var body = master.GetBody();
-                    if (!body || state.Transformed) return;
-                    state.OriginalBody = BodyCatalog.GetBodyName(body.bodyIndex);
+                    if (!body) return;
+                    if (!state.Transformed) state.OriginalBody = BodyCatalog.GetBodyName(body.bodyIndex);
                     state.Transformed = true;
+                    state.CurrentCell = cell;
                     int generation = ++state.Generation;
                     SwapBody(master, captured);
                     BookRunner.Schedule(ShapeDuration, () =>
@@ -277,10 +342,22 @@ namespace Diabloid.Books
                 return true;
             }
 
+            private static void ScheduleRevert(CharacterMaster master) => BookRunner.Schedule(0.05f, () => Revert(master));
+
+            /// <summary>Новое тело в форме (превращение, новый этап) — бафф формы.</summary>
+            public static void OnBodyStart(CharacterBody body)
+            {
+                if (!body || !ShapeshiftBuff) return;
+                var master = body.master;
+                if (!master || !states.TryGetValue(master, out var state) || !state.Transformed) return;
+                if (!body.HasBuff(ShapeshiftBuff)) body.AddBuff(ShapeshiftBuff);
+            }
+
             private static void Revert(CharacterMaster master)
             {
                 if (!master || !states.TryGetValue(master, out var state) || !state.Transformed) return;
                 state.Transformed = false;
+                state.CurrentCell = -1;
                 if (!string.IsNullOrEmpty(state.OriginalBody) && master.GetBody()) SwapBody(master, state.OriginalBody);
                 else RestorePrefab(master, state);
             }
@@ -316,6 +393,7 @@ namespace Diabloid.Books
             {
                 if (!states.TryGetValue(master, out var state) || !state.Transformed) return;
                 state.Transformed = false;
+                state.CurrentCell = -1;
                 RestorePrefab(master, state);
             }
         }
@@ -481,6 +559,7 @@ namespace Diabloid.Books
             {
                 adventureTimer = 0.25f;
                 BookEffects.Adventure.Tick();
+                BookEffects.Shapeshift.PruneAll();
             }
         }
     }
